@@ -8,12 +8,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, PackageCheck, ShieldCheck, Zap } from 'lucide-react';
+import { ArrowRight, Flame, PackageCheck, ShieldCheck, Zap } from 'lucide-react';
 import { assetUrl } from '@/lib/api';
 import { buildHomeRows, slugify, type ProductRow } from '@/lib/catalogue';
 import { formatMoney } from '@/lib/format';
 import { fetchCategories, fetchProducts } from '@/lib/store-api';
-import { ImageFallback, ProductRail } from '@/components/ProductCard';
+import { AddControl, EtaChip, ImageFallback, ProductRail } from '@/components/ProductCard';
 import { ProductGrid } from '@/components/ProductGrid';
 import { Skeleton } from '@/components/ui/skeleton';
 import { selectedAddress } from '@/lib/addresses';
@@ -47,11 +47,23 @@ const HOME_PRODUCT_LIMIT = 120;
  */
 const SHELF_SIZE = 20;
 
+/**
+ * How many products the hero features.
+ *
+ * Two, and the number is doing work. One is a promotion and reads as an advert;
+ * four is a product row, which the page already has three of further down. Two
+ * side by side stay large enough to be photographs of food rather than
+ * thumbnails, at every width from a phone upward.
+ */
+const FEATURED_COUNT = 2;
+
 interface Loaded {
   categories: StoreCategory[];
   rows: ProductRow[];
   /** In-stock products, in the order the API returned them — the shop grid. */
   shelf: StoreProduct[];
+  /** The two most-ordered items, for the hero cards. */
+  featured: StoreProduct[];
   productCount: number;
 }
 
@@ -68,14 +80,19 @@ export function HomePage() {
     Promise.all([
       fetchCategories(controller.signal),
       fetchProducts({ limit: HOME_PRODUCT_LIMIT }, controller.signal),
+      // A separate request rather than a client-side sort of the list above,
+      // because the ranking is not derivable from a product: it is units sold
+      // over the last thirty days, which only the server can count.
+      fetchProducts({ sort: 'popular', limit: FEATURED_COUNT }, controller.signal),
     ])
-      .then(([categories, products]) => {
+      .then(([categories, products, popular]) => {
         setData({
           categories,
           rows: buildHomeRows(products, categories),
           // Out-of-stock rows are filtered here rather than hidden with CSS so
           // the grid below never renders a short row of tiles nobody can buy.
           shelf: products.filter((product) => product.in_stock),
+          featured: popular.filter((product) => product.in_stock).slice(0, FEATURED_COUNT),
           productCount: products.length,
         });
       })
@@ -152,6 +169,50 @@ export function HomePage() {
             <ArrowRight className="size-4" aria-hidden />
           </Link>
         </div>
+
+        {/*
+          The two most-ordered items, and "most ordered" is literal.
+
+          `?sort=popular` ranks by units actually sold over the last thirty
+          days, counting only orders that became sales — a run of cancellations
+          or refused deliveries cannot promote a product. The alternative was to
+          label the two cheapest items "most ordered", which is the mistake this
+          file's own docstring warns about: the prototype's "Trending Near You"
+          row with no trend data behind it.
+
+          No sales figure is shown, because none is sent. The server ranks and
+          returns the order; how many units the shop moves in a month is the
+          store's business, exactly as cost price and exact stock are.
+
+          The space is reserved while loading rather than left empty. Rendering
+          nothing until the fetch lands means the hero grows and shoves the rest
+          of the page down — layout shift in the most prominent place there is,
+          and a customer who taps where a card is about to appear hits whatever
+          arrives instead. The grid further down already reserves its space the
+          same way, so the page settles once rather than twice.
+
+          Nothing is rendered at all if the shop turns out to have no sellable
+          products: an empty band beats two placeholder cards for items that do
+          not exist.
+        */}
+        {(data === null || data.featured.length > 0) && (
+          <div className="container-page pb-6 lg:pb-8">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {data
+                ? data.featured.map((product, index) => (
+                    <FeaturedCard
+                      key={product.id}
+                      product={product}
+                      promiseMinutes={promise}
+                      rank={index + 1}
+                    />
+                  ))
+                : Array.from({ length: FEATURED_COUNT }, (_, index) => (
+                    <Skeleton key={index} className="aspect-[16/10] rounded-4xl" />
+                  ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="border-b border-border/70 py-10">
@@ -276,6 +337,89 @@ export function HomePage() {
     </>
   );
 }
+
+/**
+ * One hero card: a big picture, the price, and the add control.
+ *
+ * Wider and taller than a `ProductCard` on purpose — this is the one place on
+ * the page where a product is the headline rather than a tile in a grid, so the
+ * image gets a 16:10 crop instead of a square and the name gets room to be read
+ * rather than truncated.
+ *
+ * The whole card is a link to the product, except the add control, which stops
+ * the click from propagating. That is the same arrangement `ProductCard` uses
+ * and for the same reason: tapping the picture should open the product, and
+ * tapping Add should add it.
+ */
+function FeaturedCard({
+  product,
+  promiseMinutes,
+  rank,
+}: {
+  product: StoreProduct;
+  promiseMinutes: number | null;
+  rank: number;
+}) {
+  const image = assetUrl(product.image_url);
+
+  return (
+    <Link
+      href={`/product/${product.id}`}
+      className="group relative flex flex-col overflow-hidden rounded-4xl border border-border/70 bg-surface transition-all duration-400 ease-[var(--ease-apple)] hover:-translate-y-1 hover:shadow-card"
+    >
+      <div className="relative">
+        {image ? (
+          <img
+            src={image}
+            alt=""
+            loading={rank === 1 ? 'eager' : 'lazy'}
+            width={1200}
+            height={750}
+            className="aspect-[16/10] w-full object-cover"
+          />
+        ) : (
+          <ImageFallback name={product.name} className="aspect-[16/10] w-full text-3xl" />
+        )}
+
+        <span className="absolute left-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-background/92 px-3 py-1.5 text-[11px] font-semibold shadow-lift backdrop-blur-xl">
+          <Flame className="size-3.5 text-amber" aria-hidden />
+          Most ordered
+        </span>
+      </div>
+
+      <div className="flex flex-1 items-end justify-between gap-4 p-4 sm:p-5">
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-semibold sm:text-base">{product.name}</p>
+          <p className="num mt-1 flex items-baseline gap-2">
+            <span className="text-xl font-semibold sm:text-2xl">
+              {formatMoney(product.price)}
+            </span>
+            {product.unit && (
+              <span className="text-xs text-muted-foreground">{product.unit}</span>
+            )}
+          </p>
+          {promiseMinutes !== null && (
+            <span className="mt-2 inline-block">
+              <EtaChip minutes={promiseMinutes} subtle />
+            </span>
+          )}
+        </div>
+
+        {/* Stops the card's own navigation, so Add adds rather than opens. */}
+        <span
+          className="shrink-0"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <AddControl product={product} size="lg" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 
 function CategoryImage({ category }: { category: StoreCategory }) {
   const image = assetUrl(category.image_url);

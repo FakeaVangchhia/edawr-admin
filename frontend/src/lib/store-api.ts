@@ -23,6 +23,16 @@ export interface ProductQuery {
   category?: string;
   limit?: number;
   offset?: number;
+  /**
+   * `'popular'` orders by units actually sold in the last 30 days, over orders
+   * that became sales — cancelled and failed deliveries do not count.
+   *
+   * The server does the counting and returns only the order. There is no sales
+   * figure on the wire, on the same reasoning that keeps cost price and exact
+   * stock off `StoreProductSerializer`: how much the shop moves in a month is
+   * the store's business, and a competitor reading it learns the throughput.
+   */
+  sort?: 'popular';
 }
 
 export function fetchStoreConfig(signal?: AbortSignal): Promise<StoreConfig> {
@@ -42,6 +52,7 @@ export function fetchProducts(
   if (query.category && query.category !== 'All') params.set('category', query.category);
   if (query.limit) params.set('limit', String(query.limit));
   if (query.offset) params.set('offset', String(query.offset));
+  if (query.sort) params.set('sort', query.sort);
 
   const suffix = params.toString();
   return request<StoreProduct[]>(
