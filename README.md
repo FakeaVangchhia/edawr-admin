@@ -113,7 +113,7 @@ can reach it. Seeded rider: `+919000000002` / PIN `4813`.
 ## Tests
 
 ```bash
-cd backend  && uv run manage.py test       # 348 tests, ~13s (Postgres)
+cd backend  && uv run manage.py test       # 351 tests, ~13s (Postgres)
 cd frontend && npm test                    # 131 tests, ~4s
 cd admin    && npm test                    # 40 tests, ~7s
 ```

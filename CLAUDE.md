@@ -37,7 +37,7 @@ uv run manage.py migrate                 # create/update the schema
 uv run manage.py seed                    # load sample data (deletes all rows)
 uv run manage.py runserver 8000          # use 0.0.0.0:8000 for the phone
 uv run manage.py makemigrations          # after editing api/models.py
-uv run manage.py test                    # 348 tests, ~13s on Postgres
+uv run manage.py test                    # 351 tests, ~13s on Postgres
 uv run manage.py check --deploy          # before shipping
 ```
 

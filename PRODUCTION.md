@@ -669,7 +669,7 @@ money) and an alert on 5xx rate.
   never hydrates.
 - **console** — the same, with 40 tests.
 - **backend** — disabled in this repo (`backend/` is gitignored here) and live in
-  the `edawr-backend` repository, where the identical job runs 348 tests against
+  the `edawr-backend` repository, where the identical job runs 351 tests against
   a **Postgres service container**, checks migrations are committed
   (`makemigrations --check`), and runs `check --deploy` with production settings.
 
@@ -682,7 +682,7 @@ Deploys stay manual. At this scale that is fine; untested merges are not.
 ## Test suites
 
 ```bash
-cd backend  && uv run manage.py test    # 348 tests, ~13s against Postgres
+cd backend  && uv run manage.py test    # 351 tests, ~13s against Postgres
 cd frontend && npm test                 # 131 tests, ~4s
 cd admin    && npm test                 # 40 tests, ~7s
 cd mobile   && npx tsc --noEmit         # no test runner — see Part 4
