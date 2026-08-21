@@ -8,16 +8,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Clock, PackageCheck, ShieldCheck, Zap } from 'lucide-react';
+import { ArrowRight, PackageCheck, ShieldCheck, Zap } from 'lucide-react';
 import { assetUrl } from '@/lib/api';
 import { buildHomeRows, slugify, type ProductRow } from '@/lib/catalogue';
 import { formatMoney } from '@/lib/format';
 import { fetchCategories, fetchProducts } from '@/lib/store-api';
 import { ImageFallback, ProductRail } from '@/components/ProductCard';
+import { ProductGrid } from '@/components/ProductGrid';
 import { Skeleton } from '@/components/ui/skeleton';
 import { selectedAddress } from '@/lib/addresses';
 import { useAddressBook, useStoreConfig } from '@/hooks/useStoreData';
-import type { StoreCategory } from '@/types';
+import type { StoreCategory, StoreProduct } from '@/types';
 
 /**
  * The storefront home.
@@ -36,9 +37,21 @@ import type { StoreCategory } from '@/types';
 /** One page of the catalogue is plenty to build every row from. */
 const HOME_PRODUCT_LIMIT = 120;
 
+/**
+ * How many products the home grid shows before "View all".
+ *
+ * Twenty is four full rows at the grid's widest breakpoint (five columns) and
+ * ten at its narrowest (two) — enough that the page is visibly a shop rather
+ * than a sample, without turning the home page into /products, which exists and
+ * pages properly.
+ */
+const SHELF_SIZE = 20;
+
 interface Loaded {
   categories: StoreCategory[];
   rows: ProductRow[];
+  /** In-stock products, in the order the API returned them — the shop grid. */
+  shelf: StoreProduct[];
   productCount: number;
 }
 
@@ -60,6 +73,9 @@ export function HomePage() {
         setData({
           categories,
           rows: buildHomeRows(products, categories),
+          // Out-of-stock rows are filtered here rather than hidden with CSS so
+          // the grid below never renders a short row of tiles nobody can buy.
+          shelf: products.filter((product) => product.in_stock),
           productCount: products.length,
         });
       })
@@ -76,87 +92,65 @@ export function HomePage() {
 
   return (
     <>
-      <section className="relative overflow-hidden border-b border-border/70">
-        <div className="container-page grid items-center gap-10 py-14 lg:grid-cols-2 lg:gap-16 lg:py-24">
-          <div className="animate-rise">
-            <span className="inline-flex items-center gap-2 rounded-full bg-amber-soft px-3 py-1.5 text-xs font-medium text-amber-foreground">
-              <Zap className="size-3.5 text-amber" aria-hidden />
-              {promise ? `${promise} min delivery` : 'Quick delivery'} · {city}
-            </span>
+      {/*
+        A band, not a landing page.
 
-            <h1 className="mt-6 text-[40px] font-semibold leading-[1.04] sm:text-6xl lg:text-[68px]">
-              Everything you need.
-              <br />
+        This used to be a two-column hero at `lg:py-24` with a 68px headline, a
+        three-stat strip and a 2x2 grid of category tiles — most of a laptop
+        viewport, and every pixel of it above the first product. For a shop
+        whose whole promise is speed, the slowest thing on the page was reaching
+        something you could buy.
+
+        What went, and why:
+        - The category tiles. They repeated "Shop by aisle", which sits directly
+          below with every aisle rather than four of them.
+        - The stat strip's own row. The same three facts are now inline in the
+          line under the headline, where they read as a sentence instead of
+          occupying a bordered block.
+        - Two thirds of the type scale and most of the padding.
+
+        What stayed: the promise, the city, and one primary action. That is what
+        a returning customer needs; the rest was for a first visit that only
+        happens once.
+      */}
+      <section className="border-b border-border/70">
+        <div className="container-page flex flex-wrap items-center justify-between gap-x-8 gap-y-4 py-6 lg:py-8">
+          <div className="animate-rise">
+            <h1 className="text-[26px] font-semibold leading-[1.1] sm:text-[32px]">
+              Everything you need,{' '}
               <span className="text-muted-foreground">
-                {promise ? `Delivered in ${promise} minutes.` : 'Delivered in minutes.'}
+                {promise ? `in ${promise} minutes.` : 'in minutes.'}
               </span>
             </h1>
 
-            <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-muted-foreground">
-              Fresh groceries, essentials, snacks and household staples — brought to your door
-              before you have time to think about it.
+            {/* The three facts from the old stat block, as one line. */}
+            <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <Zap className="size-3.5 text-amber" aria-hidden />
+                {address ? `Deliver to ${address.label} · ${city}` : `Delivering across ${city}`}
+              </span>
+              {config && (
+                <span className="inline-flex items-center gap-1.5">
+                  <ShieldCheck className="size-3.5 text-amber" aria-hidden />
+                  Free over {formatMoney(config.free_delivery_above)}
+                </span>
+              )}
+              {data && (
+                <span className="inline-flex items-center gap-1.5">
+                  <PackageCheck className="size-3.5 text-amber" aria-hidden />
+                  {data.categories.length} aisles
+                </span>
+              )}
             </p>
-
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Link
-                href="/products"
-                className="inline-flex h-13 items-center gap-2 rounded-full bg-primary px-8 text-base font-semibold text-primary-foreground transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:shadow-lift"
-              >
-                Shop now
-                <ArrowRight className="size-4" aria-hidden />
-              </Link>
-              <Link
-                href="/categories"
-                className="inline-flex h-13 items-center rounded-full border border-border px-8 text-base font-medium transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:bg-secondary"
-              >
-                Explore aisles
-              </Link>
-            </div>
-
-            <dl className="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t pt-8">
-              <Stat
-                icon={<Clock className="size-4 text-amber" aria-hidden />}
-                label="Our promise"
-                value={promise ? `${promise} min` : '—'}
-              />
-              <Stat
-                icon={<PackageCheck className="size-4 text-amber" aria-hidden />}
-                label="Aisles"
-                value={data ? String(data.categories.length) : '—'}
-              />
-              <Stat
-                icon={<ShieldCheck className="size-4 text-amber" aria-hidden />}
-                label="Free over"
-                value={config ? formatMoney(config.free_delivery_above) : '—'}
-              />
-            </dl>
           </div>
 
-          <div className="relative hidden animate-rise lg:block">
-            <div className="grid grid-cols-2 gap-4">
-              {(data?.categories ?? []).slice(0, 4).map((category) => (
-                <CategoryTile key={category.name} category={category} />
-              ))}
-              {!data &&
-                Array.from({ length: 4 }, (_, index) => (
-                  <Skeleton key={index} className="aspect-square rounded-4xl" />
-                ))}
-            </div>
-
-            {promise !== null && (
-              <div className="absolute bottom-6 left-6 flex items-center gap-3 rounded-2xl bg-background/90 px-4 py-3 shadow-lift backdrop-blur-xl">
-                <span className="grid size-9 place-items-center rounded-xl bg-amber-soft">
-                  <Zap className="size-4 text-amber" aria-hidden />
-                </span>
-                <span>
-                  <span className="block text-sm font-semibold">Arriving in {promise} minutes</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {address ? `Deliver to ${address.label} · ${city}` : `Delivering across ${city}`}
-                  </span>
-                </span>
-              </div>
-            )}
-          </div>
+          <Link
+            href="/products"
+            className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-primary px-6 text-sm font-semibold text-primary-foreground transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:shadow-lift"
+          >
+            Shop all
+            <ArrowRight className="size-4" aria-hidden />
+          </Link>
         </div>
       </section>
 
@@ -194,6 +188,52 @@ export function HomePage() {
                   </div>
                 ))}
           </div>
+        </div>
+      </section>
+
+      {/*
+        The shop itself, and the reason the hero above is a band.
+
+        The home page used to reach its first product only after a full-height
+        hero and an aisle strip, and then only as horizontal rails — where
+        anything past the fourth tile is off-screen and has to be discovered by
+        swiping. A grid puts real stock in front of a customer immediately and
+        shows twenty of them at once.
+
+        The rails below still earn their place: they are *cuts* of the same
+        catalogue — cheapest, best discount, per aisle — which is a different
+        question from "what is in the shop". This answers that one.
+
+        `ProductGrid` rather than a bespoke layout, so the column counts match
+        /products, /category and /search exactly. A customer who scrolls from
+        here to the full catalogue should not notice the boundary.
+      */}
+      <section className="py-10">
+        <div className="container-page">
+          <div className="mb-5 flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold sm:text-[28px]">In the shop now</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {data
+                  ? `${data.shelf.length} of ${data.productCount} items in stock today`
+                  : 'Loading the shelves…'}
+              </p>
+            </div>
+            <Link
+              href="/products"
+              className="shrink-0 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              View all
+            </Link>
+          </div>
+
+          <ProductGrid
+            products={data ? data.shelf.slice(0, SHELF_SIZE) : []}
+            isLoading={data === null}
+            promiseMinutes={promise}
+            emptyTitle="The shelves are empty right now"
+            emptyBody="Everything is out of stock at the moment. Please check back shortly."
+          />
         </div>
       </section>
 
@@ -237,18 +277,6 @@ export function HomePage() {
   );
 }
 
-function Stat({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
-  return (
-    <div>
-      <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {icon}
-        {label}
-      </dt>
-      <dd className="num mt-1 text-2xl font-semibold">{value}</dd>
-    </div>
-  );
-}
-
 function CategoryImage({ category }: { category: StoreCategory }) {
   const image = assetUrl(category.image_url);
   if (!image) return <ImageFallback name={category.name} className="aspect-square w-full" />;
@@ -261,17 +289,5 @@ function CategoryImage({ category }: { category: StoreCategory }) {
       height={800}
       className="aspect-square w-full object-cover"
     />
-  );
-}
-
-function CategoryTile({ category }: { category: StoreCategory }) {
-  return (
-    <Link
-      href={`/category/${slugify(category.name)}`}
-      className="group overflow-hidden rounded-4xl bg-surface transition-all duration-400 ease-[var(--ease-apple)] hover:shadow-lift"
-    >
-      <CategoryImage category={category} />
-      <p className="px-4 py-3 text-sm font-medium">{category.name}</p>
-    </Link>
   );
 }
