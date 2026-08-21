@@ -23,7 +23,17 @@ export type OrderStatus =
   | 'Ready'
   | 'Dispatched'
   | 'Delivered'
-  | 'Cancelled';
+  | 'Cancelled'
+  /**
+   * A delivery that was attempted and did not happen — refused at the door,
+   * nobody home, the bike went down.
+   *
+   * Terminal, and it deliberately does **not** return the stock. When the rider
+   * reports it the bag is on a bike somewhere; restocking then would list units
+   * the store cannot pick. `POST /api/orders/{id}/restock` is the separate step
+   * a manager takes once the goods are physically back on the shelf.
+   */
+  | 'Failed';
 
 export type DeliveryType = 'instant' | 'slow';
 
@@ -122,6 +132,11 @@ export interface Order {
   dispatched_at: string | null;
   delivered_at: string | null;
   cancelled_at: string | null;
+  /**
+   * When a failed delivery's goods were returned to the shelf. `null` means
+   * they have not been — which for a Failed order is the manager's next action.
+   */
+  restocked_at: string | null;
 }
 
 /** Store staff: managers and riders. A different table from console accounts. */
@@ -242,6 +257,31 @@ export interface StoreConfig {
     fee: number;
     promise_minutes: number;
   }[];
+}
+
+/**
+ * The operational settings, read and written by /settings.
+ *
+ * Separate from `StoreConfig`, which is the public read-only shape the
+ * storefront gets. These are the four things a manager changes during a shift,
+ * and the reason /settings stopped being read-only: they live in a database
+ * table rather than in environment variables precisely so changing them does
+ * not need a deploy.
+ */
+export interface StoreSettings {
+  /** The kill switch. Independent of the hours — a shop inside its opening
+   *  hours can still be shut for a stock-take or a power cut. */
+  is_accepting_orders: boolean;
+  /** Shown to the customer verbatim when checkout is off. Blank falls back to a
+   *  generic sentence, so "back in 20 minutes" is possible. */
+  closed_message: string;
+  /** Local wall clock at the store, `HH:MM:SS`. Equal values mean always open. */
+  opens_at: string;
+  closes_at: string;
+  delivery_radius_km: number;
+  store_latitude: number;
+  store_longitude: number;
+  updated_at: string;
 }
 
 /** A list response plus the total from the `X-Total-Count` header. The body

@@ -1,51 +1,74 @@
 'use client';
 
-import { ExternalLink, Info } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Info, Loader2 } from 'lucide-react';
 
 import { ErrorBanner, PageHeader, Panel } from '@/components/ui';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, errorMessage } from '@/lib/api';
 import { minutes, money } from '@/lib/format';
-import { storeConfig } from '@/lib/queries';
+import { storeConfig, storeSettings, updateStoreSettings } from '@/lib/queries';
 import { useResource } from '@/lib/use-resource';
+import type { StoreSettings } from '@/types';
 
 /**
- * Store settings — currently read-only, and honest about why.
+ * Store settings — half of this page is editable and half deliberately is not,
+ * and the split is the interesting part.
  *
- * Every value here comes from an environment variable on the API server, not
- * from a database row, so there is nothing for a form on this page to write to.
- * The tempting alternative was to render editable-looking inputs and wire them
- * to nothing; a control that silently does not work is worse than no control,
- * because it costs the operator a support call to discover.
+ * **Read-only: the economics.** Fees, the free-delivery threshold, the minimum
+ * order, the two delivery tiers. These come from environment variables on the
+ * API server. They are pricing decisions, they change rarely, and changing one
+ * should require the same care as a deploy — so there is nothing for a form
+ * here to write to, and rendering editable-looking inputs wired to nothing
+ * would be worse than showing none.
  *
- * Making these editable means moving them into a settings table on the backend.
- * That is a real change with a real migration, and it is not this one.
+ * **Editable: the operations.** Opening hours, the pause switch, the delivery
+ * radius, the store's own position. These live in a `store_settings` table and
+ * are written through `PATCH /api/settings`. They change *within* a shift and
+ * the person changing them is behind the counter at the time. Requiring a
+ * redeploy to pause checkout during a power cut means the shop carries on
+ * promising 15-minute delivery it cannot make.
+ *
+ * That table is what closed three of the four gaps this page used to list at
+ * the bottom.
  */
 export default function SettingsPage() {
   const config = useResource('store-config', (signal) => storeConfig(signal));
+  const settings = useResource('store-settings', (signal) => storeSettings(signal));
   const data = config.data;
 
   return (
     <>
       <PageHeader
         title="Settings"
-        description="How the storefront prices and promises delivery."
+        description="What the store promises, and whether it is open."
       />
-
-      <div className="mb-4 flex items-start gap-2 rounded-[0.4rem] border border-line bg-raised px-3 py-2.5 text-xs text-ink-soft">
-        <Info size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
-        <p>
-          These are read from the API server&apos;s environment, so they are shown here rather
-          than edited here — changing one means changing the server&apos;s configuration and
-          redeploying. They are on this page because a manager needs to know what the store is
-          currently promising, not because the page can change it.
-        </p>
-      </div>
 
       {config.error ? (
         <div className="mb-4">
           <ErrorBanner message={config.error} onRetry={config.refresh} />
         </div>
       ) : null}
+      {settings.error ? (
+        <div className="mb-4">
+          <ErrorBanner message={settings.error} onRetry={settings.refresh} />
+        </div>
+      ) : null}
+
+      {settings.data ? (
+        <OperationsForm settings={settings.data} onSaved={settings.refresh} />
+      ) : (
+        <div className="skeleton mb-3 h-64" />
+      )}
+
+      <div className="mb-4 mt-3 flex items-start gap-2 rounded-[0.4rem] border border-line bg-raised px-3 py-2.5 text-xs text-ink-soft">
+        <Info size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+        <p>
+          Everything below is read from the API server&apos;s environment, so it is shown here
+          rather than edited here — changing one means changing the server&apos;s configuration
+          and redeploying. Prices are deliberately not a thing this screen can change on a
+          Tuesday afternoon.
+        </p>
+      </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Panel title="Store">
@@ -106,23 +129,29 @@ export default function SettingsPage() {
       <Panel title="Known gaps" className="mt-3">
         {/* Stated rather than hidden. An operator who knows the system cannot
             do something will work around it; one who assumes it can will find
-            out at the worst moment. */}
+            out at the worst moment.
+
+            Three entries were removed from this list because the thing they
+            described was built, not because the list got tidied: opening hours
+            and a pause switch, a delivery-zone check, and an exit for a
+            dispatched order that cannot be delivered. */}
         <ul className="space-y-2 text-sm text-ink-soft">
-          <Gap title="No opening hours and no closed state">
-            An order placed at 3am is accepted and promised in 15 minutes, whether or not anyone
-            is there. There is also no way to pause checkout during a stock-take or a power cut.
-          </Gap>
-          <Gap title="No delivery-zone check">
-            Checkout accepts any address. One outside the delivery area is charged and promised
-            like any other, then never appears in a rider&apos;s feed.
-          </Gap>
-          <Gap title="A dispatched order cannot be cancelled">
-            Once a rider has it, the only recorded outcome is Delivered. A refused delivery has no
-            correct button in any of the three apps, and the stock is never returned.
-          </Gap>
           <Gap title="Cash is recorded as intent, not collection">
-            There is no record of money actually taken, so end-of-shift reconciliation means
-            summing order totals and trusting them.
+            The rider is told what to collect, and nothing records what they actually took. End of
+            shift reconciliation means summing order totals and trusting them, which for a cash
+            business is the main way money goes missing quietly.
+          </Gap>
+          <Gap title="No customer notification outside the browser tab">
+            The tracking page is the only channel. Close the tab and the customer has no idea when
+            the rider is coming — no SMS, no WhatsApp, no push.
+          </Gap>
+          <Gap title="No receipt and no tax fields">
+            No printable invoice, no HSN codes, no GSTIN. A compliant tax invoice cannot be issued
+            from this system if turnover crosses the registration threshold.
+          </Gap>
+          <Gap title="Straight-line distance">
+            The delivery radius and rider ranking use direct distance. Aizawl is built on ridges,
+            so the road can be several times it — a genuinely 6 km address may be a 20-minute ride.
           </Gap>
         </ul>
         <p className="mt-3 flex items-center gap-1 text-xs text-ink-faint">
@@ -131,6 +160,273 @@ export default function SettingsPage() {
         </p>
       </Panel>
     </>
+  );
+}
+
+/**
+ * The editable half.
+ *
+ * Local state seeded from the server row, and PATCHed back — only the fields
+ * that were touched, because the endpoint is partial by design. A full replace
+ * would mean the pause switch had to be resent with every edit to the hours,
+ * and a screen that forgot would silently reopen a store somebody had shut.
+ */
+function OperationsForm({
+  settings,
+  onSaved,
+}: {
+  settings: StoreSettings;
+  onSaved: () => void;
+}) {
+  /**
+   * The draft, tagged with the server row it was seeded from.
+   *
+   * The obvious shape — `useState(settings)` plus an effect that re-seeds when
+   * `settings` changes — is an error in this codebase
+   * (`react-hooks/set-state-in-effect`), and the rule is right: that effect
+   * fires a second render after every refetch, and the window between them is a
+   * render showing stale edits over fresh data.
+   *
+   * Tagging instead means there is nothing to synchronise. `edits.from` is the
+   * row this draft was built on; when the resource refetches, `settings` is a
+   * new object, the tag no longer matches, and `draft` below falls back to the
+   * server's values on the very same render. Same technique as `useResource`
+   * itself and as the storefront's `useQuote`.
+   */
+  const [edits, setEdits] = useState<{ from: StoreSettings; value: StoreSettings } | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+
+  const draft = edits?.from === settings ? edits.value : settings;
+
+  const patch = <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => {
+    setEdits({ from: settings, value: { ...draft, [key]: value } });
+    setSaved('');
+  };
+
+  async function save(overrides: Partial<StoreSettings> = {}) {
+    setBusy(true);
+    setError('');
+    try {
+      await updateStoreSettings({
+        is_accepting_orders: draft.is_accepting_orders,
+        closed_message: draft.closed_message,
+        // The API takes `HH:MM` or `HH:MM:SS`; an <input type="time"> gives the
+        // former, and the row comes back as the latter.
+        opens_at: draft.opens_at,
+        closes_at: draft.closes_at,
+        delivery_radius_km: Number(draft.delivery_radius_km),
+        store_latitude: Number(draft.store_latitude),
+        store_longitude: Number(draft.store_longitude),
+        ...overrides,
+      });
+      setSaved('Saved.');
+      onSaved();
+    } catch (caught) {
+      // The server's own sentence. A slipped decimal point in the radius comes
+      // back as "A radius over 100 km is almost certainly a mistake", which is
+      // more useful than anything this screen could invent.
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const alwaysOpen = draft.opens_at.slice(0, 5) === draft.closes_at.slice(0, 5);
+
+  return (
+    <Panel title="Operations">
+      {error ? (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      ) : null}
+
+      {/* Always mounted, text swapped — a region inserted at the moment its
+          content first changes is not announced by most screen readers. */}
+      <p role="status" aria-live="polite" className="mb-2 min-h-4 text-xs text-ok">
+        {saved}
+      </p>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Taking orders
+          </h3>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={draft.is_accepting_orders}
+              disabled={busy}
+              onChange={(event) => {
+                const next = event.target.checked;
+                patch('is_accepting_orders', next);
+                // Saved immediately rather than on a button, because this is the
+                // control someone reaches for during a power cut. Making them
+                // find "Save" afterwards is how orders keep arriving for another
+                // thirty seconds.
+                void save({ is_accepting_orders: next });
+              }}
+            />
+            <span>
+              <span className="block font-medium text-ink">Accept new orders</span>
+              <span className="block text-xs text-ink-faint">
+                Unticking this stops checkout immediately, whatever the opening hours say. Use it
+                for a stock-take, a power cut, or a shift with nobody to ride.
+              </span>
+            </span>
+          </label>
+
+          <div className="mt-3">
+            <label className="label" htmlFor="closed-message">
+              Message shown when closed
+            </label>
+            <input
+              id="closed-message"
+              className="field"
+              placeholder="Back in 20 minutes"
+              value={draft.closed_message}
+              disabled={busy}
+              onChange={(event) => patch('closed_message', event.target.value)}
+            />
+            <p className="mt-1 text-xs text-ink-faint">
+              Shown to the customer word for word on the cart and at checkout. Leave it blank for a
+              generic one.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Opening hours
+          </h3>
+
+          <div className="flex flex-wrap gap-3">
+            <div>
+              <label className="label" htmlFor="opens-at">
+                Opens
+              </label>
+              <input
+                id="opens-at"
+                type="time"
+                className="field"
+                value={draft.opens_at.slice(0, 5)}
+                disabled={busy}
+                onChange={(event) => patch('opens_at', event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="closes-at">
+                Closes
+              </label>
+              <input
+                id="closes-at"
+                type="time"
+                className="field"
+                value={draft.closes_at.slice(0, 5)}
+                disabled={busy}
+                onChange={(event) => patch('closes_at', event.target.value)}
+              />
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">
+            Local time in Aizawl. A window that crosses midnight works — 22:00 to 02:00 is a late
+            shift, not an empty range.{' '}
+            {alwaysOpen ? <strong className="text-ink">Equal times mean open 24 hours.</strong> : null}
+          </p>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Delivery area
+          </h3>
+
+          <div>
+            <label className="label" htmlFor="radius">
+              Radius (km)
+            </label>
+            <input
+              id="radius"
+              type="number"
+              step="0.5"
+              min="0.5"
+              className="field"
+              value={draft.delivery_radius_km}
+              disabled={busy}
+              onChange={(event) => patch('delivery_radius_km', Number(event.target.value))}
+            />
+            <p className="mt-1 text-xs text-ink-faint">
+              Checkout refuses an address further than this from the store. Straight-line distance,
+              so allow for the ridges.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Where the store is
+          </h3>
+
+          <div className="flex flex-wrap gap-3">
+            <div>
+              <label className="label" htmlFor="latitude">
+                Latitude
+              </label>
+              <input
+                id="latitude"
+                type="number"
+                step="0.0001"
+                className="field"
+                value={draft.store_latitude}
+                disabled={busy}
+                onChange={(event) => patch('store_latitude', Number(event.target.value))}
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="longitude">
+                Longitude
+              </label>
+              <input
+                id="longitude"
+                type="number"
+                step="0.0001"
+                className="field"
+                value={draft.store_longitude}
+                disabled={busy}
+                onChange={(event) => patch('store_longitude', Number(event.target.value))}
+              />
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">
+            The centre the delivery radius is measured from. Change it if the shop moves.
+          </p>
+        </section>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2">
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => save()}>
+          {busy ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : null}
+          Save settings
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={() => {
+            setEdits(null);
+            setError('');
+            setSaved('');
+          }}
+        >
+          Discard changes
+        </button>
+      </div>
+    </Panel>
   );
 }
 

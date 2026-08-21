@@ -10,6 +10,7 @@ import {
   ErrorBanner,
   Field,
   PageHeader,
+  Pagination,
   Panel,
   TableSkeleton,
 } from '@/components/ui';
@@ -33,10 +34,13 @@ import type { StaffUser } from '@/types';
  * records — a Manager hires and stands down riders, because otherwise a store
  * cannot take on help at the weekend without ringing the owner.
  */
+const PAGE_SIZE = 25;
+
 export default function StaffPage() {
   const [roleFilter, setRoleFilter] = useState('');
-  const staff = useResource(`staff:${roleFilter}`, (signal) =>
-    listStaff({ role: roleFilter || undefined }, signal),
+  const [offset, setOffset] = useState(0);
+  const staff = useResource(`staff:${roleFilter}:${offset}`, (signal) =>
+    listStaff({ role: roleFilter || undefined, limit: PAGE_SIZE, offset }, signal),
   );
   const refresh = useCallback(() => staff.refresh(), [staff]);
 
@@ -50,6 +54,7 @@ export default function StaffPage() {
   // Memoised for the same reason as in accounts/page.tsx: `?? []` is a new
   // array each render, so an unmemoised `rows` makes the memo below pointless.
   const rows = useMemo(() => staff.data?.rows ?? [], [staff.data]);
+  const total = staff.data?.total ?? 0;
   const riders = useMemo(() => rows.filter((row) => row.role === 'delivery'), [rows]);
 
   async function confirmRemove() {
@@ -203,6 +208,13 @@ export default function StaffPage() {
                 ))}
               </tbody>
             </table>
+            <Pagination
+              total={total}
+              limit={PAGE_SIZE}
+              offset={offset}
+              onOffset={setOffset}
+              noun="staff"
+            />
           </div>
         )}
       </Panel>

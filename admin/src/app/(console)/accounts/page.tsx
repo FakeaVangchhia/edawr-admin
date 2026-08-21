@@ -10,6 +10,7 @@ import {
   ErrorBanner,
   Field,
   PageHeader,
+  Pagination,
   Panel,
   TableSkeleton,
 } from '@/components/ui';
@@ -42,9 +43,14 @@ export default function AccountsPage() {
  * cheaper in support calls, to disable the control and say why beside it —
  * so the rule is visible before it is hit rather than only after.
  */
+const PAGE_SIZE = 25;
+
 function Accounts() {
   const session = useSession();
-  const accounts = useResource('accounts', (signal) => listAccounts({}, signal));
+  const [offset, setOffset] = useState(0);
+  const accounts = useResource(`accounts:${offset}`, (signal) =>
+    listAccounts({ limit: PAGE_SIZE, offset }, signal),
+  );
   const refresh = useCallback(() => accounts.refresh(), [accounts]);
 
   const [editing, setEditing] = useState<AdminAccount | null>(null);
@@ -57,6 +63,7 @@ function Accounts() {
   // Memoised because `?? []` produces a new array on every render, which would
   // make the memo below recompute every time and defeat its purpose.
   const rows = useMemo(() => accounts.data?.rows ?? [], [accounts.data]);
+  const total = accounts.data?.total ?? 0;
 
   // Mirrors the backend's guard so the UI can explain it in advance.
   const activeAdmins = useMemo(
@@ -217,6 +224,13 @@ function Accounts() {
                 })}
               </tbody>
             </table>
+            <Pagination
+              total={total}
+              limit={PAGE_SIZE}
+              offset={offset}
+              onOffset={setOffset}
+              noun="accounts"
+            />
           </div>
         )}
       </Panel>

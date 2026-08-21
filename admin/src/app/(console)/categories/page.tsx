@@ -10,6 +10,7 @@ import {
   ErrorBanner,
   Field,
   PageHeader,
+  Pagination,
   Panel,
   TableSkeleton,
 } from '@/components/ui';
@@ -25,8 +26,15 @@ import {
 import { useResource } from '@/lib/use-resource';
 import type { Category } from '@/types';
 
+const PAGE_SIZE = 25;
+
 export default function CategoriesPage() {
-  const categories = useResource('categories', (signal) => listCategories({}, signal));
+  const [offset, setOffset] = useState(0);
+  // The offset is part of the resource key, so paging is a refetch rather than
+  // a slice of something already in memory — same pattern as /products.
+  const categories = useResource(`categories:${offset}`, (signal) =>
+    listCategories({ limit: PAGE_SIZE, offset }, signal),
+  );
   const refresh = useCallback(() => categories.refresh(), [categories]);
 
   const [editing, setEditing] = useState<Category | null>(null);
@@ -36,6 +44,7 @@ export default function CategoriesPage() {
   const [busy, setBusy] = useState(false);
 
   const rows = categories.data?.rows ?? [];
+  const total = categories.data?.total ?? 0;
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -164,6 +173,13 @@ export default function CategoriesPage() {
                 })}
               </tbody>
             </table>
+            <Pagination
+              total={total}
+              limit={PAGE_SIZE}
+              offset={offset}
+              onOffset={setOffset}
+              noun="categories"
+            />
           </div>
         )}
       </Panel>

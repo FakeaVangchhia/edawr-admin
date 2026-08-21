@@ -42,6 +42,7 @@ const STATUS_OPTIONS: (OrderStatus | '')[] = [
   'Dispatched',
   'Delivered',
   'Cancelled',
+  'Failed',
 ];
 
 type View = 'board' | 'table';

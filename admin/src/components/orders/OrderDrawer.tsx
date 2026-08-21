@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { ConfirmDialog, Drawer, ErrorBanner, StatusBadge } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
-import { advanceOrder, assignOrder } from '@/lib/queries';
+import { advanceOrder, assignOrder, restockOrder } from '@/lib/queries';
 import { dateTime, minutes, money, phone as formatPhone } from '@/lib/format';
 import type { Order, OrderStatus, StaffUser } from '@/types';
 
@@ -16,11 +16,16 @@ import type { Order, OrderStatus, StaffUser } from '@/types';
  * and the backend re-checks both — this is here so the console offers only
  * buttons that will work, not so it can decide. An illegal move returns 409.
  *
- * Note `Dispatched` offers no cancel. That is not an oversight in this file: the
- * backend's state machine genuinely has no path from Dispatched to Cancelled,
- * because the goods have left the building and cancelling would restore stock
- * that is on a motorbike. It is a known gap — a refused delivery currently has
- * no correct button anywhere — and inventing one here would only produce a 409.
+ * Note `Dispatched` still offers no *cancel*, and that remains correct: the
+ * goods have left the building, and cancelling restores stock under a lock.
+ * What it now offers instead is **Delivery failed** — the exit that was missing.
+ * Until it existed, a customer who refused the bag, an address nobody answered
+ * and a stolen bike all had the same only button, "Mark delivered", so the
+ * goods were recorded as sold and paid for and the stock never came back.
+ *
+ * `Failed` is terminal and moves no stock by itself. Returning the units is the
+ * separate `Return stock to shelf` action below, taken when the rider is
+ * actually back — see `restockOrder`.
  */
 const NEXT_STEPS: Record<OrderStatus, { status: OrderStatus; label: string }[]> = {
   Placed: [{ status: 'Packing', label: 'Start packing' }],
@@ -32,9 +37,13 @@ const NEXT_STEPS: Record<OrderStatus, { status: OrderStatus; label: string }[]> 
   ],
   Delivered: [],
   Cancelled: [],
+  Failed: [],
 };
 
 const CANCELLABLE: OrderStatus[] = ['Placed', 'Packing', 'Ready'];
+
+/** Where a delivery can fail. Only from the rider's hands. */
+const FAILABLE: OrderStatus[] = ['Dispatched'];
 
 export function OrderDrawer({
   order,
@@ -51,6 +60,7 @@ export function OrderDrawer({
   const [error, setError] = useState('');
   const [riderId, setRiderId] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmFail, setConfirmFail] = useState(false);
   const [reason, setReason] = useState('');
 
   if (!order) return null;
@@ -73,6 +83,11 @@ export function OrderDrawer({
 
   const steps = NEXT_STEPS[order.status] ?? [];
   const canCancel = CANCELLABLE.includes(order.status);
+  const canFail = FAILABLE.includes(order.status);
+  // A failed order whose goods are not yet back on the shelf. This is the
+  // manager's next action on it, and the only place in any of the three apps
+  // that returns the stock.
+  const awaitingRestock = order.status === 'Failed' && order.restocked_at === null;
   const availableRiders = riders.filter((rider) => rider.is_active);
 
   return (
@@ -106,6 +121,26 @@ export function OrderDrawer({
                 onClick={() => setConfirmCancel(true)}
               >
                 Cancel order
+              </button>
+            ) : null}
+            {canFail ? (
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={busy}
+                onClick={() => setConfirmFail(true)}
+              >
+                Delivery failed
+              </button>
+            ) : null}
+            {awaitingRestock ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={() => run(() => restockOrder(order.id))}
+              >
+                Return stock to shelf
               </button>
             ) : null}
           </div>
@@ -321,6 +356,46 @@ export function OrderDrawer({
         onConfirm={() => {
           setConfirmCancel(false);
           run(() => advanceOrder(order.id, 'Cancelled', reason.trim()));
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmFail}
+        destructive
+        busy={busy}
+        title={`Record order #${order.id} as a failed delivery?`}
+        confirmLabel="Record failure"
+        message={
+          <div className="space-y-2">
+            <p>
+              This ends the order without recording a sale. The stock is{' '}
+              <strong>not</strong> returned yet — the bag is with the rider. Use{' '}
+              <em>Return stock to shelf</em> once the goods are physically back.
+            </p>
+            <div>
+              <label className="label" htmlFor="fail-reason">
+                What happened
+              </label>
+              <input
+                id="fail-reason"
+                className="field"
+                placeholder="Customer refused the order at the door"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+              {/* Required by the API, not merely encouraged. This is the one
+                  transition whose whole value is the sentence attached to it —
+                  it is what the store reads when the customer rings. */}
+              <p className="mt-1 text-xs text-ink-faint">
+                Required. Saved with the order and the activity log.
+              </p>
+            </div>
+          </div>
+        }
+        onCancel={() => setConfirmFail(false)}
+        onConfirm={() => {
+          setConfirmFail(false);
+          run(() => advanceOrder(order.id, 'Failed', reason.trim()));
         }}
       />
     </>

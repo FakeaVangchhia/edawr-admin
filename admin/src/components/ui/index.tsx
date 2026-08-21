@@ -455,6 +455,7 @@ const STATUS_TONE: Record<string, string> = {
   Dispatched: 'badge-accent',
   Delivered: 'badge-ok',
   Cancelled: 'badge-danger',
+  Failed: 'badge-danger',
 };
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {

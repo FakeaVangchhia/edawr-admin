@@ -51,7 +51,11 @@ export default function ProductsPage() {
 
   const key = JSON.stringify(filters);
   const products = useResource(key, (signal) => listProducts(filters, signal));
-  const categories = useResource('categories', (signal) => listCategories({}, signal));
+  // The whole list, explicitly: this feeds a filter <select>, and a paged
+  // dropdown is a filter that silently cannot reach half the catalogue.
+  const categories = useResource('category-options', (signal) =>
+    listCategories({ limit: 200 }, signal),
+  );
 
   const refresh = useCallback(() => products.refresh(), [products]);
 

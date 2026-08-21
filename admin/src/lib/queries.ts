@@ -22,6 +22,7 @@ import type {
   RevenuePoint,
   StaffUser,
   StoreConfig,
+  StoreSettings,
   TopProduct,
 } from '@/types';
 
@@ -114,8 +115,20 @@ export async function uploadProductImage(file: File): Promise<string> {
 
 /* --- categories ---------------------------------------------------------- */
 
-export function listCategories(params: { q?: string; limit?: number } = {}, signal?: AbortSignal) {
-  return authPage<Category>(`/api/categories${query({ limit: 200, ...params })}`, { signal });
+/**
+ * Categories, paged.
+ *
+ * `limit: 200` used to be hardcoded with no offset, which is a page-one-only
+ * list wearing the clothes of a complete one: `X-Total-Count` reported the true
+ * total while the table showed at most 200 rows, so a store past that saw a
+ * count it could not reach. `limit` and `offset` are now the caller's, and the
+ * default is a screenful.
+ */
+export function listCategories(
+  params: { q?: string; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+) {
+  return authPage<Category>(`/api/categories${query({ limit: 50, ...params })}`, { signal });
 }
 
 export function createCategory(body: Partial<Category>) {
@@ -191,13 +204,32 @@ export function assignOrder(id: number, riderId: number) {
   });
 }
 
+/**
+ * Return a failed delivery's goods to the shelf.
+ *
+ * The second half of the failed-delivery path, and a separate call on purpose:
+ * marking an order Failed records the outcome at the customer's door, and the
+ * stock does not come back until the rider does. Idempotent server-side through
+ * `restocked_at`, so two managers clicking at once cannot double the inventory
+ * — a second call answers 409 rather than adding the units twice.
+ */
+export function restockOrder(id: number) {
+  return authRequest<Order>(`/api/orders/${id}/restock`, { method: 'POST' });
+}
+
 /* --- staff --------------------------------------------------------------- */
 
 export function listStaff(
-  params: { role?: string; q?: string; active?: string } = {},
+  params: {
+    role?: string;
+    q?: string;
+    active?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
   signal?: AbortSignal,
 ) {
-  return authPage<StaffUser>(`/api/users${query({ limit: 200, ...params })}`, { signal });
+  return authPage<StaffUser>(`/api/users${query({ limit: 50, ...params })}`, { signal });
 }
 
 export function listRiders(signal?: AbortSignal) {
@@ -222,8 +254,11 @@ export function deleteStaff(id: number) {
 
 /* --- console accounts (Admin only) --------------------------------------- */
 
-export function listAccounts(params: { q?: string; role?: string } = {}, signal?: AbortSignal) {
-  return authPage<AdminAccount>(`/api/admins${query({ limit: 200, ...params })}`, { signal });
+export function listAccounts(
+  params: { q?: string; role?: string; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+) {
+  return authPage<AdminAccount>(`/api/admins${query({ limit: 50, ...params })}`, { signal });
 }
 
 export function createAccount(body: {
@@ -301,4 +336,21 @@ export function analyticsInventory(signal?: AbortSignal) {
 
 export function storeConfig(signal?: AbortSignal) {
   return publicRequest<StoreConfig>('/api/store/config', { signal });
+}
+
+/* --- store settings ------------------------------------------------------- */
+
+export function storeSettings(signal?: AbortSignal) {
+  return authRequest<StoreSettings>('/api/settings', { signal });
+}
+
+/**
+ * Change only what was sent.
+ *
+ * PATCH, and there is no PUT behind it. A full replace would mean the pause
+ * switch had to be resent with every edit to the opening hours, and a screen
+ * that forgot would silently reopen a store somebody had deliberately shut.
+ */
+export function updateStoreSettings(body: Partial<StoreSettings>) {
+  return authRequest<StoreSettings>('/api/settings', { method: 'PATCH', body });
 }
