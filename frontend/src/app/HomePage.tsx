@@ -8,12 +8,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Flame, PackageCheck, ShieldCheck, Zap } from 'lucide-react';
+import { ArrowRight, PackageCheck, ShieldCheck, Zap } from 'lucide-react';
 import { assetUrl } from '@/lib/api';
 import { buildHomeRows, slugify, type ProductRow } from '@/lib/catalogue';
 import { formatMoney } from '@/lib/format';
 import { fetchCategories, fetchProducts } from '@/lib/store-api';
-import { AddControl, EtaChip, ImageFallback, ProductRail } from '@/components/ProductCard';
+import { ImageFallback, ProductRail } from '@/components/ProductCard';
 import { ProductGrid } from '@/components/ProductGrid';
 import { Skeleton } from '@/components/ui/skeleton';
 import { selectedAddress } from '@/lib/addresses';
@@ -48,12 +48,12 @@ const HOME_PRODUCT_LIMIT = 120;
 const SHELF_SIZE = 20;
 
 /**
- * How many products the hero features.
+ * How many aisles the hero features.
  *
  * Two, and the number is doing work. One is a promotion and reads as an advert;
- * four is a product row, which the page already has three of further down. Two
- * side by side stay large enough to be photographs of food rather than
- * thumbnails, at every width from a phone upward.
+ * four is the aisle strip, which sits directly below with all of them. Two side
+ * by side stay large enough to be photographs rather than thumbnails, at every
+ * width from a phone upward.
  */
 const FEATURED_COUNT = 2;
 
@@ -62,8 +62,8 @@ interface Loaded {
   rows: ProductRow[];
   /** In-stock products, in the order the API returned them — the shop grid. */
   shelf: StoreProduct[];
-  /** The two most-ordered items, for the hero cards. */
-  featured: StoreProduct[];
+  /** The two busiest aisles, for the hero cards. */
+  featured: StoreCategory[];
   productCount: number;
 }
 
@@ -79,11 +79,18 @@ export function HomePage() {
 
     Promise.all([
       fetchCategories(controller.signal),
-      fetchProducts({ limit: HOME_PRODUCT_LIMIT }, controller.signal),
-      // A separate request rather than a client-side sort of the list above,
-      // because the ranking is not derivable from a product: it is units sold
-      // over the last thirty days, which only the server can count.
-      fetchProducts({ sort: 'popular', limit: FEATURED_COUNT }, controller.signal),
+      // Sorted by what people actually buy. The grid below is the page's
+      // answer to "what is in the shop", and cheapest-first answers a question
+      // nobody asked — a returning customer is looking for the things they came
+      // back for. The rails further down still re-sort this same list by price
+      // and by discount, which is what makes those rails a different cut rather
+      // than the same one again.
+      fetchProducts({ limit: HOME_PRODUCT_LIMIT, sort: 'popular' }, controller.signal),
+      // A second categories request rather than a client-side sort of the
+      // first, because the ranking is not derivable from a category: it is
+      // units sold across its products over the last thirty days, which only
+      // the server can count.
+      fetchCategories(controller.signal, { sort: 'popular' }),
     ])
       .then(([categories, products, popular]) => {
         setData({
@@ -92,7 +99,7 @@ export function HomePage() {
           // Out-of-stock rows are filtered here rather than hidden with CSS so
           // the grid below never renders a short row of tiles nobody can buy.
           shelf: products.filter((product) => product.in_stock),
-          featured: popular.filter((product) => product.in_stock).slice(0, FEATURED_COUNT),
+          featured: popular.slice(0, FEATURED_COUNT),
           productCount: products.length,
         });
       })
@@ -199,12 +206,11 @@ export function HomePage() {
           <div className="container-page pb-6 lg:pb-8">
             <div className="grid gap-4 sm:grid-cols-2">
               {data
-                ? data.featured.map((product, index) => (
+                ? data.featured.map((category, index) => (
                     <FeaturedCard
-                      key={product.id}
-                      product={product}
-                      promiseMinutes={promise}
-                      rank={index + 1}
+                      key={category.name}
+                      category={category}
+                      priority={index === 0}
                     />
                   ))
                 : Array.from({ length: FEATURED_COUNT }, (_, index) => (
@@ -339,83 +345,47 @@ export function HomePage() {
 }
 
 /**
- * One hero card: a big picture, the price, and the add control.
+ * One hero card: a picture of an aisle, and nothing else.
  *
- * Wider and taller than a `ProductCard` on purpose — this is the one place on
- * the page where a product is the headline rather than a tile in a grid, so the
- * image gets a 16:10 crop instead of a square and the name gets room to be read
- * rather than truncated.
+ * **No visible label and no button, deliberately.** The whole card is the
+ * target, so there is nothing on it to miss and nothing competing with the
+ * image — which is the point of a card this size. The aisle strip immediately
+ * below carries the names, so a customer who wants to read rather than look has
+ * them a few pixels away.
  *
- * The whole card is a link to the product, except the add control, which stops
- * the click from propagating. That is the same arrangement `ProductCard` uses
- * and for the same reason: tapping the picture should open the product, and
- * tapping Add should add it.
+ * "Nothing else" stops at the accessible name. `aria-label` carries the aisle,
+ * because a link whose only content is a decorative image announces nothing at
+ * all to a screen reader — it would read as "link" and the customer would have
+ * to follow it to find out where it goes. The image is `alt=""` for the same
+ * reason: with the link already named, alt text would make it announce twice.
+ *
+ * Until a category has an image uploaded on the console, `ImageFallback` shows
+ * its initial on a tinted ground. That is a placeholder rather than a design —
+ * this card is worth what the photograph in it is worth.
  */
-function FeaturedCard({
-  product,
-  promiseMinutes,
-  rank,
-}: {
-  product: StoreProduct;
-  promiseMinutes: number | null;
-  rank: number;
-}) {
-  const image = assetUrl(product.image_url);
+function FeaturedCard({ category, priority }: { category: StoreCategory; priority: boolean }) {
+  const image = assetUrl(category.image_url);
 
   return (
     <Link
-      href={`/product/${product.id}`}
-      className="group relative flex flex-col overflow-hidden rounded-4xl border border-border/70 bg-surface transition-all duration-400 ease-[var(--ease-apple)] hover:-translate-y-1 hover:shadow-card"
+      href={`/category/${slugify(category.name)}`}
+      aria-label={category.name}
+      className="group block overflow-hidden rounded-4xl bg-surface transition-all duration-400 ease-[var(--ease-apple)] hover:-translate-y-1 hover:shadow-card"
     >
-      <div className="relative">
-        {image ? (
-          <img
-            src={image}
-            alt=""
-            loading={rank === 1 ? 'eager' : 'lazy'}
-            width={1200}
-            height={750}
-            className="aspect-[16/10] w-full object-cover"
-          />
-        ) : (
-          <ImageFallback name={product.name} className="aspect-[16/10] w-full text-3xl" />
-        )}
-
-        <span className="absolute left-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-background/92 px-3 py-1.5 text-[11px] font-semibold shadow-lift backdrop-blur-xl">
-          <Flame className="size-3.5 text-amber" aria-hidden />
-          Most ordered
-        </span>
-      </div>
-
-      <div className="flex flex-1 items-end justify-between gap-4 p-4 sm:p-5">
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-semibold sm:text-base">{product.name}</p>
-          <p className="num mt-1 flex items-baseline gap-2">
-            <span className="text-xl font-semibold sm:text-2xl">
-              {formatMoney(product.price)}
-            </span>
-            {product.unit && (
-              <span className="text-xs text-muted-foreground">{product.unit}</span>
-            )}
-          </p>
-          {promiseMinutes !== null && (
-            <span className="mt-2 inline-block">
-              <EtaChip minutes={promiseMinutes} subtle />
-            </span>
-          )}
-        </div>
-
-        {/* Stops the card's own navigation, so Add adds rather than opens. */}
-        <span
-          className="shrink-0"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-        >
-          <AddControl product={product} size="lg" />
-        </span>
-      </div>
+      {image ? (
+        <img
+          src={image}
+          alt=""
+          // The first card is usually the largest thing above the fold, so it
+          // is the one worth not deferring.
+          loading={priority ? 'eager' : 'lazy'}
+          width={1200}
+          height={750}
+          className="aspect-[16/10] w-full object-cover transition-transform duration-500 ease-[var(--ease-apple)] group-hover:scale-[1.03]"
+        />
+      ) : (
+        <ImageFallback name={category.name} className="aspect-[16/10] w-full text-5xl" />
+      )}
     </Link>
   );
 }

@@ -39,8 +39,22 @@ export function fetchStoreConfig(signal?: AbortSignal): Promise<StoreConfig> {
   return request<StoreConfig>('/api/store/config', { signal });
 }
 
-export function fetchCategories(signal?: AbortSignal): Promise<StoreCategory[]> {
-  return request<StoreCategory[]>('/api/store/categories', { signal });
+export interface CategoryQuery {
+  /**
+   * `'popular'` orders aisles by units sold across their products in the last
+   * 30 days, over orders that became sales. Omitted keeps the manager's own
+   * `sort_order`, which exists so the shop front is a decision rather than an
+   * accident.
+   */
+  sort?: 'popular';
+}
+
+export function fetchCategories(
+  signal?: AbortSignal,
+  query: CategoryQuery = {},
+): Promise<StoreCategory[]> {
+  const suffix = query.sort ? `?sort=${query.sort}` : '';
+  return request<StoreCategory[]>(`/api/store/categories${suffix}`, { signal });
 }
 
 export function fetchProducts(
