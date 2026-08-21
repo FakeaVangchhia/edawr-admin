@@ -6,11 +6,16 @@ through a mobile app — on a **15-minute promise**.
 
 ## Monorepo layout
 
-| Path        | Stack                                   | Purpose                              |
-| ----------- | --------------------------------------- | ------------------------------------ |
-| `frontend/` | Next.js 16 (App Router, React 19, TW4)  | Storefront + admin console (UI only) |
-| `backend/`  | Django 6 + DRF + SQLite                 | **The API** — all data access        |
-| `mobile/`   | Expo / React Native (SDK 54)            | Delivery rider app                   |
+| Path        | Stack                                  | Purpose                          |
+| ----------- | -------------------------------------- | -------------------------------- |
+| `frontend/` | Next.js 16 (App Router, React 19, TW4) | Customer storefront (UI only)    |
+| `admin/`    | Next.js 16, its own design system      | Staff console, port 3001 (UI only) |
+| `backend/`  | Django 6 + DRF + PostgreSQL            | **The API** — all data access    |
+| `mobile/`   | Expo / React Native (SDK 54)           | Delivery rider app               |
+
+The console is a separate package with its own deployment, not a route inside
+the storefront. It used to be the latter; that version had no role checks and
+was removed.
 
 > `backend/` is its own git repository (`edawr-backend`) with its own remote, so
 > the root repo ignores it. Commit backend changes from inside `backend/`.
@@ -58,10 +63,19 @@ Three terminals.
 
 Dependencies are managed with [uv](https://docs.astral.sh/uv/).
 
+The API runs against **PostgreSQL**, not SQLite. The row locks checkout depends
+on to stop the last unit of stock being sold twice are a no-op on SQLite, so a
+suite that passes there leaves the invariant unverified.
+
 ```bash
+psql -U postgres -c "CREATE ROLE edawr LOGIN PASSWORD 'choose-one';"
+psql -U postgres -c "CREATE DATABASE edawr OWNER edawr ENCODING 'UTF8';"
+psql -U postgres -c "ALTER ROLE edawr CREATEDB;"   # for the test database
+
 cd backend
+cp .env.example .env          # then set DATABASE_URL and the two secrets
 uv sync                       # creates .venv from uv.lock
-uv run manage.py migrate      # creates edawr.db
+uv run manage.py migrate
 uv run manage.py seed         # 8 categories, 33 products, 5 sample orders
 uv run manage.py runserver 8000
 ```
@@ -69,16 +83,20 @@ uv run manage.py runserver 8000
 Interactive API docs: http://localhost:8000/docs
 Seeded admin login: `admin@edawr.local` / `admin1234`
 
-### 2. Frontend (storefront + admin)
+### 2. Storefront and console
+
+Two packages, two ports, the same one environment variable.
 
 ```bash
-cd frontend
-cp .env.example .env.local    # NEXT_PUBLIC_API_URL=http://localhost:8000
-npm install
-npm run dev                   # http://localhost:3000
+cd frontend && cp .env.example .env && npm install && npm run dev   # :3000
+cd admin    && cp .env.example .env && npm install && npm run dev   # :3001
 ```
 
-Scripts: `npm run dev` · `npm run build` · `npm run start` · `npm run lint`
+Scripts in both: `npm run dev` · `npm run build` · `npm run start` ·
+`npm run lint` · `npm test`
+
+`backend/.env` must list both origins in `CORS_ORIGINS`, or the console renders
+every screen while every request inside them is blocked.
 
 ### 3. Mobile (rider app)
 
@@ -95,30 +113,41 @@ can reach it. Seeded rider: `+919000000002` / PIN `4813`.
 ## Tests
 
 ```bash
-cd backend  && uv run manage.py test       # 160 tests, ~1s
-cd frontend && npm test                    # 27 tests, ~1.5s
+cd backend  && uv run manage.py test       # 348 tests, ~13s (Postgres)
+cd frontend && npm test                    # 131 tests, ~4s
+cd admin    && npm test                    # 40 tests, ~7s
 ```
 
-The backend suite is the substantial one: pricing arithmetic, checkout under
-concurrency, the state machine, permissions, and what each serializer must
-never leak.
+CI runs all three on every push — see `.github/workflows/ci.yml`.
 
-The frontend suite covers the two pieces of pure logic that can silently corrupt
-what a customer sees — the cart store (persistence, cross-tab sync, malformed
-input, quota failures) and money formatting. Component and end-to-end tests are
-still missing; see "Known gaps".
+The backend suite is the substantial one: pricing arithmetic, the state machine,
+permissions, what each serializer must never leak, opening hours, the delivery
+zone, failed deliveries, and upload type-sniffing. It runs against Postgres,
+which is the point — `select_for_update()` is a no-op on SQLite, so the lock
+that stops the last unit of stock being sold twice would be unverified there.
 
-**The mobile app has no tests at all.**
+The storefront suite is pure logic only, because `@testing-library/react` is not
+installed there: the cart store (persistence, cross-tab sync, malformed input,
+quota failures), money formatting, and the delivery-zone helper. `admin/` does
+install it and does render components.
+
+**The mobile app has no tests and no test runner.** `npx tsc --noEmit` and
+`npx expo-doctor` are its only automated checks.
 
 ## Architecture
 
 ```
-  Next.js :3000            Django/DRF :8000         SQLite / Postgres
-  ─────────────            ────────────────         ─────────────────
-  Storefront    ──┐
-  Admin console ──┼──► apiUrl()/authFetch() ──► /api/* routes ──► edawr.db
-  Rider app     ──┘         (Bearer JWT)         + /uploads/*
+  Next.js :3000  ──┐
+  the storefront   │
+                   │
+  Next.js :3001  ──┼──►  Django/DRF :8000  ──►  PostgreSQL
+  the console      │      /api/* routes         + /uploads/*
+                   │      (Bearer JWT)
+  Expo rider app ──┘
 ```
+
+Three clients, one API, one database. The two web apps deploy separately and
+share nothing but the shape of the JSON.
 
 ### The rules that hold this together
 
@@ -140,56 +169,50 @@ rather than the order id. There is no sequence to walk.
 **The rider comes from the token, never the request body.** `accept`, `reject`
 and `status` take no rider id, and each checks ownership.
 
-**One API base URL.** `frontend/src/lib/api.ts` is the only place the backend
-host appears — and `frontend/src/proxy.ts` reads the same variable to name the
-API origin in the Content Security Policy.
+**One API base URL per app.** `src/lib/api.ts` is the only place the backend
+host appears, and `src/proxy.ts` reads the same variable to name the API origin
+in the Content Security Policy. Get it wrong and the browser blocks every
+request and every product image; it is the first thing to check when a screen
+renders and stays empty.
+
+**401 ends a session; 403 does not.** 401 means the server does not know who you
+are — clear the token and go to the login screen. 403 means it knows exactly who
+you are and this particular thing is not yours: show the message, keep the
+session. Conflating them signs a manager out of pages they merely lack rights
+for, and used to sign riders out mid-shift.
 
 ## Deploying
 
-Read `backend/README.md` first — the startup check refuses to boot with insecure
-configuration, and each item it rejects is exploitable rather than untidy.
+**`PRODUCTION.md` is the one deployment document** — the architecture, the
+runbook, every environment variable, and an honest list of what is still
+missing. It replaced three overlapping files that had started to contradict each
+other.
 
-The short version:
+The startup check in `api/apps.py` refuses to boot with insecure configuration,
+and each item it rejects is exploitable rather than untidy:
 
 ```bash
 ENVIRONMENT=production
 JWT_SECRET=$(uv run python -c "import secrets; print(secrets.token_urlsafe(48))")
 DJANGO_SECRET_KEY=$(uv run python -c "import secrets; print(secrets.token_urlsafe(48))")
 ALLOWED_HOSTS=api.your-domain
-CORS_ORIGINS=https://your-frontend-domain
-CACHE_URL=redis://your-redis:6379/0
+CORS_ORIGINS=https://your-storefront,https://your-console
+CACHE_URL=rediss://your-redis:6379/0
 DATABASE_URL=postgres://user:password@host:5432/edawr
 ```
 
-**Move to Postgres before taking real orders.** SQLite serialises every write
-against the whole database and has no row locks, so the `select_for_update()`
-that stops the last unit of stock being sold twice is a no-op there.
-
 ## Known gaps
 
-- **No component, end-to-end or mobile tests.** The backend has 160 and the
-  frontend has 27 covering pure logic, but nothing renders a component or drives
-  a real checkout in a browser, and the rider app is untested entirely. This is
-  the biggest remaining hole.
-- **Cash on delivery only.** No payment gateway is integrated. `payment_method`
-  exists on the order and `PAYMENT_CHOICES` has one entry.
-- **No over-the-air updates or crash reporting in the mobile app.** Every fix
-  ships through a store review, and errors are shown to the rider and nowhere
-  else.
-- **No push notifications.** The rider feed and the customer's tracking page
-  both poll.
-- **No socket.io server**, so "real-time" is polling everywhere. The listeners
-  are null-guarded and off unless `NEXT_PUBLIC_SOCKET_URL` is set.
-- **Rider dispatch is pull, not push.** Every available rider in range sees
-  every packed order except ones they declined; first to accept wins. An order
-  declined by everyone stops appearing anywhere, which is why
-  `GET /api/orders?stalled=true` exists for the manager. A push design with
-  timed offers would need a scheduler and a background worker.
-- **Straight-line distance.** Rider service radius uses haversine, and Aizawl is
-  built on ridges — road distance can be several times it. It decides whether an
-  order is plausibly in a rider's area, and is not shown to anyone as an ETA.
-- **`backend/edawr-sqlalchemy-backup.db`** is the pre-migration SQLite file,
-  kept for data recovery. Nothing uses it; delete it when you are satisfied.
+The full list, with the reasoning, is Part 4 of `PRODUCTION.md`. The three that
+matter most:
+
+- **No automated backups.** The highest-value item in the project. Order history
+  *is* the business record for a cash business.
+- **Cash is recorded as intent, never as collection.** There is no `paid_at` and
+  no reconciliation view, so "how much cash does this rider owe the till?" can
+  only be answered by summing order totals and trusting them.
+- **No out-of-band notification.** A customer who closes the tracking tab has no
+  idea when the rider is coming.
 
 ## Regenerating the app icons
 

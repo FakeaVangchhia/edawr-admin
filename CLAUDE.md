@@ -11,12 +11,11 @@ order from a web storefront and a rider delivers on a 15-minute promise.
   storefront. **UI only — it serves no API routes.**
 - `admin/` — Next.js 16, the **staff console** for Admins and Managers. A
   separate package with its own design system and its own deployment. UI only.
-- `backend/` — Django 6 + DRF + SQLite. **This is the API.**
+- `backend/` — Django 6 + DRF + **PostgreSQL**. **This is the API.**
 - `mobile/` — Expo / React Native (SDK 54), the rider app.
 
-`frontend/` still contains an older single-route admin screen at `/admin`. The
-console in `admin/` supersedes it; the old one has no role checks and should be
-removed once the new one has been exercised in production.
+`frontend/` used to contain a single-route admin screen at `/admin` with no role
+checks. It was removed in the storefront rebuild; `admin/` is the console.
 
 Supabase and the WhatsApp ordering module were removed. The backend was migrated
 from FastAPI/SQLAlchemy/Pydantic to Django/DRF; no FastAPI code remains. Do not
@@ -38,7 +37,7 @@ uv run manage.py migrate                 # create/update the schema
 uv run manage.py seed                    # load sample data (deletes all rows)
 uv run manage.py runserver 8000          # use 0.0.0.0:8000 for the phone
 uv run manage.py makemigrations          # after editing api/models.py
-uv run manage.py test                    # 275 tests, ~2s
+uv run manage.py test                    # 348 tests, ~13s on Postgres
 uv run manage.py check --deploy          # before shipping
 ```
 
@@ -56,12 +55,23 @@ uv run manage.py seed_admin --email you@example.com --password '...' --role admi
 uv run manage.py demo_clear --dry-run     # then without the flag
 ```
 
-**The mobile app has no tests, and `frontend/` has no component or end-to-end
-tests** — only pure logic (cart store, money formatting), because
-`@testing-library/react` is not installed there. `admin/` does install it and
-does render components in tests. End-to-end coverage is still missing
-everywhere; if you touch a package substantially, consider whether you can leave
-a test behind.
+**The mobile app has no tests and no test runner, and `frontend/` has no
+component or end-to-end tests** — only pure logic (cart store, money formatting,
+the delivery-zone helper), because `@testing-library/react` is not installed
+there. `admin/` does install it and does render components in tests. End-to-end
+coverage is still missing everywhere; if you touch a package substantially,
+consider whether you can leave a test behind.
+
+CI (`.github/workflows/ci.yml`) runs the two web suites plus lint and a
+production build on every push, and fails if any Next.js route starts
+prerendering — see the CSP note below. The backend's identical job lives in the
+`edawr-backend` repository and runs against a Postgres service container.
+
+**Deployment lives in one place: `PRODUCTION.md` at the root.** It replaced
+`DEPLOYMENT-HANDOFF.md`, `BACKLOG.md` and `backend/docs/deployment.md`, which
+described overlapping parts of the same deploy and had begun to contradict each
+other about what was already built. Part 4 of it is the current gap list — read
+that before proposing something as "missing".
 
 ## The rules that matter
 
@@ -90,11 +100,18 @@ request.
 ```
 Placed → Packing → Ready → Dispatched → Delivered
    └────────┴────────┴──────────────────→ Cancelled
-                       Dispatched → Ready   (rider hands it back)
+                       Dispatched → Ready    (rider hands it back)
+                       Dispatched → Failed   (attempted, did not happen)
 ```
 
 Cancelling goes through `checkout.cancel_order()`, never `advance_status` alone,
 because it must also restore stock under a lock.
+
+`Failed` is terminal and restores **nothing** — when the rider reports it the
+bag is on a bike, and restocking then would list units the store cannot pick.
+`checkout.restock_failed_order()` is the separate step, behind
+`POST /api/orders/{id}/restock`, made idempotent by `restocked_at`. It requires
+a reason: that sentence is what the store reads when the customer rings.
 
 ### Two product serializers, on purpose
 `ProductSerializer` (admin) carries cost price, supplier and shelf location.
@@ -147,6 +164,30 @@ audit failure must not fail the request that already committed — and it strips
 anything named like a credential, so a PIN reset is logged as `pin_reset` rather
 than as a PIN.
 
+### Operational settings are a table, commerce settings are the environment
+`StoreSettings` (singleton, `pk=1`) holds opening hours, the accept-orders kill
+switch, the delivery radius and the store's coordinates. Fees, thresholds and
+the delivery tiers stay in environment variables.
+
+The line is *operational vs commercial*. The first four change within a shift
+and the person changing them is behind the counter, so requiring a redeploy to
+pause checkout during a power cut means the shop keeps promising 15-minute
+delivery it cannot make. Prices are decisions that should change with the care
+of a deploy. `GET`/`PATCH /api/settings`, either console role, audited.
+
+`StoreSettings.load()` is a plain SELECT with a `get_or_create` fallback, not
+`get_or_create` outright — it is on the checkout path and on every
+`/api/store/config`, and the savepoint plus INSERT attempt was measurable.
+
+### Coordinates are nullable, and that is load-bearing
+`Order.customer_latitude/longitude` are `null=True` with no default. They used
+to default to the *store's own* position, so an order carrying no position
+recorded the customer as standing at the counter: every rider measured 0.00 km
+away, the radius filter matched everyone, and the rider app showed a confident,
+false `0.0 km`. Geolocation is opt-in at checkout and declining it is a
+supported outcome — `dispatch._rank` returns every rider at distance `None` for
+such an order, sorted last.
+
 ### Public endpoints are the security boundary
 `api/urls.py` marks which routes are public. Checkout and tracking are
 unauthenticated because a customer has no account, so each is throttled and
@@ -162,6 +203,14 @@ particular:
   dead code. It carries the CSP with a per-request nonce.
 - `params` in a dynamic route is a **Promise** and must be awaited.
 - Turbopack is the default for `dev` and `build`.
+
+### `await connection()` in the root layout is load-bearing
+Both apps' root layouts call it. The CSP uses `script-src 'strict-dynamic'`,
+which makes a CSP3 browser ignore `'self'` and trust only nonced scripts — and a
+prerendered page's script tags were written at build time with no nonce, so the
+browser blocks every one and the page never hydrates. **It only breaks in
+`next build`**; `next dev` renders per request, so it is invisible locally and
+appears first on the deployed site. CI fails the build if any route prerenders.
 
 ### The CSP names the API origin
 `src/proxy.ts` derives `connect-src` and `img-src` from `NEXT_PUBLIC_API_URL`.

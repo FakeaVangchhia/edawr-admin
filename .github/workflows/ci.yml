@@ -1,0 +1,175 @@
+# Run the tests on every push and pull request.
+#
+# There was no CI at all before this: 348 backend tests, 131 storefront tests
+# and 40 console tests that ran only when someone remembered. Manual deploys are
+# fine at this scale for a long time — untested merges are not, and that is the
+# gap this closes. Deployment stays manual on purpose; see PRODUCTION.md.
+#
+# **The backend is a separate git repository** (`edawr-backend`), ignored by the
+# root repo, so this file cannot test it from here. The `backend` job below is
+# the same workflow, copied into that repository — it is kept in this file as
+# well so the two do not drift silently, and so anyone reading the root repo can
+# see what the API's pipeline is. Delete the copy if the repositories are ever
+# merged with `git subtree`.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, dev]
+  pull_request:
+
+# A new push to the same branch makes the previous run irrelevant. Without this
+# a busy afternoon queues five runs of a commit nobody will look at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  storefront:
+    name: Storefront (frontend/)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `ci` rather than `install`: it installs exactly the lockfile and fails
+      # if package.json disagrees with it, rather than quietly resolving
+      # something nobody has run.
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm test
+
+      # The build is the test that matters most here and the one a human is
+      # least likely to run: `next dev` renders every route per request, so the
+      # prerendering behaviour that the nonce-based CSP depends on only exists
+      # in a production build. A layout that stops being dynamic passes every
+      # other check and ships a storefront that paints and never hydrates.
+      - name: Build
+        run: npm run build
+        env:
+          # Read at build time by src/proxy.ts to name the API origin in the
+          # CSP. Any syntactically valid URL will do here — nothing is fetched.
+          NEXT_PUBLIC_API_URL: https://api.example.invalid
+
+      - name: Every route must be server-rendered
+        run: |
+          # `_global-error.html` is the one legitimate prerender: it has to be
+          # servable when rendering itself has failed. Anything else in here is
+          # a page whose <script> tags carry no CSP nonce, and `strict-dynamic`
+          # means the browser will refuse every one of them.
+          stray=$(find .next/server/app -name '*.html' ! -name '_global-error.html')
+          if [ -n "$stray" ]; then
+            echo "::error::Prerendered pages found — the root layout has stopped calling await connection():"
+            echo "$stray"
+            exit 1
+          fi
+
+  console:
+    name: Console (admin/)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.invalid
+
+      - name: Every route must be server-rendered
+        run: |
+          stray=$(find .next/server/app -name '*.html' ! -name '_global-error.html')
+          if [ -n "$stray" ]; then
+            echo "::error::Prerendered pages found — the root layout has stopped calling await connection():"
+            echo "$stray"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # The API's pipeline. This job does nothing in *this* repository — `backend/`
+  # is gitignored here, so there is no source for it to run against. It is the
+  # workflow that belongs in the `edawr-backend` repository, kept here so the
+  # two are visibly the same thing.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: API (runs in edawr-backend)
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    services:
+      # Postgres, not SQLite, and this is the whole point of having a service
+      # container. `select_for_update()` is a no-op on SQLite, so the lock that
+      # stops the last unit of stock being sold twice is untested there — the
+      # suite would pass while the invariant it exists to protect was unverified.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: edawr
+          POSTGRES_PASSWORD: edawr
+          POSTGRES_DB: edawr
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://edawr:edawr@localhost:5432/edawr
+      # Not the published placeholder: `check_production_safety()` warns on it
+      # even in development, and a warning in CI output is a warning nobody
+      # reads after the third time.
+      JWT_SECRET: ci-only-not-a-real-secret-and-never-deployed
+      DJANGO_SECRET_KEY: ci-only-not-a-real-secret-and-never-deployed
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # `--frozen` fails if uv.lock disagrees with pyproject.toml rather than
+      # silently re-resolving. CI is exactly where you want to find that out.
+      - run: uv sync --frozen
+
+      - name: Migrations are committed and complete
+        # Catches the classic omission: a model edited, `makemigrations` never
+        # run, and the schema drifting from the code until a deploy discovers it.
+        run: uv run manage.py makemigrations --check --dry-run
+
+      - run: uv run manage.py migrate
+
+      - run: uv run manage.py test
+
+      - name: Deployment checks
+        # The production posture, not the development one — HSTS, SSL redirect,
+        # cookie flags. It comes back clean today and should stay that way.
+        run: uv run manage.py check --deploy
+        env:
+          ENVIRONMENT: production
+          ALLOWED_HOSTS: api.example.invalid
+          CORS_ORIGINS: https://example.invalid
+          CACHE_URL: redis://localhost:6379/0
