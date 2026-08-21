@@ -51,7 +51,22 @@ export type OrderStatus =
   | 'Ready'
   | 'Dispatched'
   | 'Delivered'
-  | 'Cancelled';
+  | 'Cancelled'
+  /** Attempted and did not happen. Terminal, and it returns no stock by itself
+   *  — the bag is with the rider until they bring it back to the shop. */
+  | 'Failed';
+
+/**
+ * The three moves a rider may make on an order they are carrying.
+ *
+ * Mirrors `RIDER_TARGETS` in backend/api/views/orders.py, and the backend
+ * re-checks it — this narrows what the app can express, not what is allowed.
+ *
+ *   Delivered  it arrived
+ *   Ready      hand it back to the pool for someone else
+ *   Failed     it was attempted and did not happen
+ */
+export type RiderStatus = Extract<OrderStatus, 'Delivered' | 'Ready' | 'Failed'>;
 
 export interface RiderSummary {
   id: number;

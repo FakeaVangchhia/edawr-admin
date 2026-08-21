@@ -35,6 +35,30 @@ export class OfflineError extends Error {
 }
 
 /**
+ * Thrown when the server knows exactly who this rider is and says no anyway.
+ *
+ * **403 is not 401, and conflating them signs riders out mid-shift.** The
+ * backend uses 403 for *authorization of an action*, not for a bad token:
+ * `PermissionDenied("This order is not assigned to you.")` is a 403, and so is
+ * every `IsRider` check on a valid rider token. This client used to throw
+ * `UnauthorizedError` for both, and every consumer treats that as "session
+ * over" — so if a manager returned an order to the pool between two polls, the
+ * rider tapped Mark Delivered, got a 403, and was signed out and told their
+ * session had expired. Which was false, and which cost them their PIN and a
+ * working signal to get back in.
+ *
+ * The rule, the same one `admin/src/lib/api.ts` states: 401 means the server
+ * does not know who you are and is the *only* thing that ends a session. 403
+ * means it knows and this is not yours — surface the message, keep the session.
+ */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
+/**
  * Thrown when the order has moved on without this rider — someone else took
  * it, or it was cancelled. Separated because it needs a refresh and a calm
  * explanation, not a retry.
@@ -75,16 +99,28 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
-  } catch {
+  } catch (caught) {
     // fetch rejects on network failure and on abort; both mean "could not
     // reach the server", which is the same thing to a rider.
-    throw new OfflineError();
+    //
+    // Deliberately narrow: only a real fetch rejection becomes OfflineError. A
+    // bare `catch {}` here also swallowed programming errors — a malformed
+    // API_URL, a body that will not serialise — and reported them to the rider
+    // as "No connection", which is the one diagnosis that stops anyone looking
+    // further.
+    if (caught instanceof TypeError || (caught as Error)?.name === 'AbortError') {
+      throw new OfflineError();
+    }
+    throw caught;
   } finally {
     clearTimeout(timeout);
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     throw new UnauthorizedError(await readError(response));
+  }
+  if (response.status === 403) {
+    throw new ForbiddenError(await readError(response));
   }
   if (response.status === 409) {
     throw new ConflictError(await readError(response));
@@ -148,14 +184,31 @@ export function rejectOrder(orderId: number, token: string): Promise<{ success: 
   return request(`/api/orders/${orderId}/reject`, { method: 'POST', token });
 }
 
+/**
+ * Move an order the rider is carrying.
+ *
+ * `status` used to be typed `'Delivered'` and nothing else, which made the
+ * app's whole vocabulary one word. A rider with a broken bike, a wrong address
+ * or a customer who would not answer had exactly two options: mark it delivered
+ * — a lie the till then has to absorb — or leave it stranded in `Dispatched`
+ * forever, which also blocked them from being offered anything new.
+ *
+ * The three the backend accepts from a rider are now all reachable:
+ *   Delivered  it arrived
+ *   Ready      hand it back to the pool (someone else can take it)
+ *   Failed     it was attempted and did not happen
+ *
+ * `reason` is required by the server for `Failed`, and ignored for the others.
+ */
 export function setOrderStatus(
   orderId: number,
   status: OrderStatus,
   token: string,
+  reason?: string,
 ): Promise<Order> {
   return request(`/api/orders/${orderId}/status`, {
     method: 'PATCH',
-    body: { status },
+    body: reason ? { status, reason } : { status },
     token,
   });
 }

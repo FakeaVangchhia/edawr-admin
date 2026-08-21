@@ -50,8 +50,9 @@
       "expo-asset"
     ],
     "extra": {
-      "//": "apiUrl is the backend a RELEASE build talks to. Development ignores it and auto-detects the dev machine's LAN IP instead (see src/config.ts). Leaving it null makes a release build fail loudly at startup rather than silently calling localhost — set it, or pass EXPO_PUBLIC_API_URL at build time.",
-      "apiUrl": null
+      "//": "apiUrl is the backend a RELEASE build talks to. Development ignores it and auto-detects the dev machine's LAN IP instead (see src/config.ts). Leaving it null makes a release build fail loudly at startup rather than silently calling localhost \u2014 set it, or pass EXPO_PUBLIC_API_URL at build time.",
+      "apiUrl": null,
+      "//cleartext": "There is deliberately no android.usesCleartextTraffic here, so cleartext stays OFF (the Android 9+ default). src/config.ts refuses an http:// API URL in a release build for the same reason: the rider PIN and bearer token would otherwise cross the network in plaintext. An on-premises deployment that genuinely needs plaintext must set usesCleartextTraffic AND relax the check in config.ts - both, or the build fails at startup instead of at the first request. (This key lives under extra because Expo validates the android block against a schema and rejects unknown properties.)"
     }
   }
 }

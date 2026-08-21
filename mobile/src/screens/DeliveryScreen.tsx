@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Linking,
+  Platform,
   RefreshControl,
   SafeAreaView,
   StatusBar,
@@ -17,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import {
   ConflictError,
+  ForbiddenError,
   OfflineError,
   UnauthorizedError,
   acceptOrder,
@@ -25,8 +28,7 @@ import {
   setAvailability,
   setOrderStatus,
 } from '../api';
-import { useSocket } from '../hooks/useSocket';
-import { DeliveryDashboard, Order, RiderSession } from '../types';
+import { DeliveryDashboard, Order, RiderSession, RiderStatus } from '../types';
 
 interface DeliveryScreenProps {
   session: RiderSession;
@@ -41,10 +43,16 @@ const emptyDashboard: DeliveryDashboard = {
 };
 
 /**
- * There is no socket.io server in this repo, so polling is the real refresh
- * path rather than a fallback. Fifteen seconds on a 15-minute promise.
+ * Polling is the refresh path, not a fallback: there is no socket server, and
+ * the `socket.io-client` dependency that pretended otherwise has been removed —
+ * it shipped in every APK, connected to nothing, and its listeners called the
+ * same `refreshDashboard` the timer below already calls. Fifteen seconds on a
+ * 15-minute promise.
  */
 const REFRESH_MS = 15_000;
+
+/** How far the poll backs off while the server is unreachable. */
+const MAX_BACKOFF_MS = 60_000;
 
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -54,9 +62,29 @@ function formatItems(order: Order) {
   return order.items.map(item => `${item.quantity}x ${item.name}`).join(', ');
 }
 
-/** Whole rupees — a rider counting cash at a door does not need paise. */
-function formatMoney(value: number) {
-  return `₹${Math.round(value)}`;
+/**
+ * The exact figure, to the paisa — the same one the customer is looking at.
+ *
+ * This used to be `₹${Math.round(value)}`, on the reasoning that a rider
+ * counting cash at a door does not need paise. The reasoning was wrong in the
+ * only way that matters: the customer's tracking page renders `grand_total`
+ * with two decimals, so a ₹342.50 order told the customer ₹342.50 and told the
+ * rider to collect ₹343. Every basket ending in .50 was a doorstep argument,
+ * every basket ending in .40 was a shortfall, and the till never reconciled
+ * against the order ledger.
+ *
+ * `Math.round` is also arithmetic on money, which is the one thing this
+ * codebase does not do on a client.
+ *
+ * The `Number` coercion guards a stringified total: DRF is configured with
+ * COERCE_DECIMAL_TO_STRING = False so these arrive as numbers, but a proxy or a
+ * future serialiser change should not render `₹NaN` at a customer's door.
+ */
+function formatMoney(value: number | string) {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? `₹${amount.toFixed(2)}`
+    : '₹—';
 }
 
 function countdownLabel(order: Order) {
@@ -66,11 +94,6 @@ function countdownLabel(order: Order) {
 }
 
 export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProps) {
-  // `isConnected` is deliberately unused: there is no socket.io server in this
-  // repo, so a "Live" indicator driven by it would read Offline permanently in
-  // every real deployment. The header shows on/off duty instead, which is a
-  // fact the rider controls and cares about.
-  const { socket } = useSocket();
   const [dashboard, setDashboard] = useState<DeliveryDashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,32 +109,62 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
   // An expired or revoked token is not an error the rider can act on, so it
   // ends the session instead of raising an alert they can only dismiss and
   // then hit again on every subsequent tap.
+  /**
+   * Signing out is not something to do by accident mid-shift.
+   *
+   * Logging back in needs the PIN *and* the network, so a rider who taps this
+   * in a dead spot is stuck at a login screen they cannot get past. The
+   * confirmation also names the active delivery, because handing an order back
+   * before signing out is the thing they should do first.
+   */
+  const confirmSignOut = useCallback(() => {
+    Alert.alert(
+      'Sign out?',
+      'You will need your phone number and PIN to sign back in, and that needs a connection.',
+      [
+        { text: 'Stay signed in', style: 'cancel' },
+        { text: 'Sign out', style: 'destructive', onPress: onLogout },
+      ],
+    );
+  }, [onLogout]);
+
   const handleExpiredSession = useCallback(() => {
     Alert.alert('Signed out', 'Your session has expired. Please sign in again.');
     onLogout();
   }, [onLogout]);
 
-  // `useCallback` because the socket effect below lists this in its dependency
-  // array; a fresh function identity each render would tear down and re-attach
-  // the listeners on every state change.
-  const refreshDashboard = useCallback(async () => {
+  // `useCallback` because the poll effect lists this in its dependency array; a
+  // fresh function identity each render would tear the timer down and rebuild
+  // it on every state change, resetting the interval each time.
+  // Guards against two refreshes running at once — a poll and a pull-to-refresh,
+  // or a poll and an AppState resume. A ref rather than state because changing
+  // it must not re-render, and because the poll loop reads it synchronously.
+  const inFlight = useRef(false);
+
+  /** Returns whether the fetch succeeded, which is what drives the backoff. */
+  const refreshDashboard = useCallback(async (): Promise<boolean> => {
+    if (inFlight.current) return true;
+    inFlight.current = true;
     try {
       setDashboard(await fetchDashboard(user.id, token));
       setIsOffline(false);
+      return true;
     } catch (error) {
       if (error instanceof UnauthorizedError) {
         handleExpiredSession();
-        return;
+        return false;
       }
       if (error instanceof OfflineError) {
         // Keep whatever is already on screen. A rider in a stairwell should
         // still be able to read the address they are delivering to.
         setIsOffline(true);
-        return;
+        return false;
       }
       console.error(error);
       Alert.alert('Connection issue', 'Unable to refresh delivery feed.');
+      return false;
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }, [user.id, token, handleExpiredSession]);
@@ -120,10 +173,62 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
     refreshDashboard();
   }, [refreshDashboard]);
 
-  // Poll, because there is no socket server to push to us.
+  /**
+   * Poll, because there is no socket server to push to us.
+   *
+   * Three things this has to get right, none of which `setInterval` gives you:
+   *
+   * **Polls must not stack.** `setInterval` with an async callback does not wait
+   * for the previous call, and the request timeout is 15s — exactly the old
+   * interval. A request that ran to its full timeout finished precisely as the
+   * next began, and anything slower overlapped, so a slow older response could
+   * land after a fast newer one and overwrite fresh data with stale. The
+   * self-scheduling `setTimeout` below cannot overlap by construction: the next
+   * one is not queued until this one has settled.
+   *
+   * **It must stop in the background.** There was no `AppState` listener at all,
+   * so the app polled every fifteen seconds all shift while nobody was looking
+   * at it — battery and mobile data, both of which a rider is paying for. It
+   * also never refreshed *on* resume, so a rider returning to the app read stale
+   * data until the next tick.
+   *
+   * **It must back off when the server is unreachable.** Hammering a dead
+   * connection every 15 seconds helps nobody; the delay doubles up to a minute
+   * and resets the moment a request succeeds.
+   */
   useEffect(() => {
-    const timer = setInterval(refreshDashboard, REFRESH_MS);
-    return () => clearInterval(timer);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    let delay = REFRESH_MS;
+
+    const tick = async () => {
+      // Skip the fetch when backgrounded, but keep the loop alive so it resumes
+      // on its own without waiting for the AppState listener to fire.
+      if (AppState.currentState === 'active') {
+        const ok = await refreshDashboard();
+        delay = ok ? REFRESH_MS : Math.min(delay * 2, MAX_BACKOFF_MS);
+      }
+      if (!cancelled) {
+        timer = setTimeout(tick, delay);
+      }
+    };
+
+    timer = setTimeout(tick, REFRESH_MS);
+
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        // Straight away, not on the next tick: the first thing a rider does
+        // after unlocking their phone is look at the screen.
+        delay = REFRESH_MS;
+        refreshDashboard();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      subscription.remove();
+    };
   }, [refreshDashboard]);
 
   const onPullToRefresh = useCallback(async () => {
@@ -163,28 +268,128 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
     });
   }, []);
 
-  useEffect(() => {
-    if (!socket) {
-      return;
-    }
+  /**
+   * Open the drop in whatever maps app the phone has.
+   *
+   * `geo:` is the Android intent scheme and `maps:` the iOS one; both accept a
+   * `q=` free-text fallback, which is what a customer who declined to share a
+   * position leaves us with. The `?q=lat,lng(label)` form drops a labelled pin
+   * rather than just centring the map, so the rider can see the destination
+   * against the road.
+   */
+  const openDirections = useCallback((order: Order) => {
+    const hasPosition =
+      order.customer_latitude !== null && order.customer_longitude !== null;
+    const label = encodeURIComponent(`Order #${order.id}`);
+    const query = hasPosition
+      ? `${order.customer_latitude},${order.customer_longitude}(${label})`
+      : encodeURIComponent(order.customer_address);
 
-    const sync = () => {
-      refreshDashboard();
-    };
+    const scheme = Platform.OS === 'ios' ? `maps:0,0?q=${query}` : `geo:0,0?q=${query}`;
+    Linking.openURL(scheme).catch(() => {
+      // No maps app, or the scheme was refused. The web fallback works
+      // everywhere and is better than an alert the rider can only dismiss.
+      const web = hasPosition
+        ? `https://www.google.com/maps/search/?api=1&query=${order.customer_latitude},${order.customer_longitude}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.customer_address)}`;
+      Linking.openURL(web).catch(() => {
+        Alert.alert('Cannot open maps', order.customer_address);
+      });
+    });
+  }, []);
 
-    socket.on('order:created', sync);
-    socket.on('order:updated', sync);
+  /**
+   * Marking an order delivered is irreversible and it is about money.
+   *
+   * `Delivered` is terminal in `Order.TRANSITIONS` — nothing, including a
+   * manager, can move an order out of it — and this is a cash-on-delivery
+   * store, so the tap also asserts that the rider took the money. It used to be
+   * a single unguarded `onPress`: one fat-finger in a jacket pocket permanently
+   * recorded an undelivered order as delivered and paid, with no correction
+   * path in any of the three apps.
+   *
+   * The confirmation states the amount, which makes it a cash-collected step
+   * rather than merely an "are you sure" — the rider has to read the figure
+   * they are confirming they hold.
+   */
+  const confirmDelivered = useCallback(
+    (order: Order) => {
+      Alert.alert(
+        `Delivered order #${order.id}?`,
+        `Confirm you handed over the order and collected ${formatMoney(order.grand_total)} in cash.
 
-    return () => {
-      socket.off('order:created', sync);
-      socket.off('order:updated', sync);
-    };
-  }, [socket, refreshDashboard]);
+This cannot be undone.`,
+        [
+          { text: 'Not yet', style: 'cancel' },
+          {
+            text: `Collected ${formatMoney(order.grand_total)}`,
+            style: 'default',
+            onPress: () => submitDecision(order.id, 'status', 'Delivered'),
+          },
+        ],
+      );
+    },
+    // `submitDecision` is redefined every render and is not memoised; listing it
+    // would defeat the useCallback entirely. It closes over `token` and
+    // `refreshDashboard`, both of which are stable for the life of a session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  /** Give the order back to the pool. The backend supports it; the app never did. */
+  const confirmHandBack = useCallback(
+    (order: Order) => {
+      Alert.alert(
+        `Hand order #${order.id} back?`,
+        'It goes back to the pool for another rider. Use this if you cannot get there — a broken bike, or you are needed elsewhere.',
+        [
+          { text: 'Keep it', style: 'cancel' },
+          {
+            text: 'Hand back',
+            onPress: () => submitDecision(order.id, 'status', 'Ready'),
+          },
+        ],
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  /**
+   * Report a delivery that was attempted and did not happen.
+   *
+   * The reason is required by the server, and rightly: it is the sentence the
+   * store reads when the customer rings. `Alert.prompt` is iOS-only, so Android
+   * gets a short list of the reasons that actually occur, which is faster to tap
+   * at a doorstep than typing anyway.
+   */
+  const confirmFailed = useCallback(
+    (order: Order) => {
+      const send = (reason: string) => submitDecision(order.id, 'status', 'Failed', reason);
+
+      Alert.alert(
+        `Could not deliver order #${order.id}?`,
+        'This ends the order without recording a sale. Bring the bag back to the shop — the stock is only returned once it is on the shelf.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Nobody answered', onPress: () => send('Nobody answered at the address') },
+          { text: 'Customer refused', onPress: () => send('Customer refused the order at the door') },
+          { text: 'Address wrong', onPress: () => send('Could not find the address') },
+        ],
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const submitDecision = async (
     orderId: number,
     action: 'accept' | 'reject' | 'status',
-    status?: 'Delivered',
+    // Was typed `'Delivered'` and nothing else, which made the app's entire
+    // vocabulary one word — see `setOrderStatus` in src/api.ts for what that
+    // cost a rider who could not complete a drop.
+    status?: RiderStatus,
+    reason?: string,
   ) => {
     try {
       setSubmittingId(orderId);
@@ -195,13 +400,23 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
       } else if (action === 'reject') {
         await rejectOrder(orderId, token);
       } else {
-        await setOrderStatus(orderId, status ?? 'Delivered', token);
+        await setOrderStatus(orderId, status ?? 'Delivered', token, reason);
       }
 
       await refreshDashboard();
     } catch (error) {
       if (error instanceof UnauthorizedError) {
         handleExpiredSession();
+        return;
+      }
+      if (error instanceof ForbiddenError) {
+        // The server knows exactly who this rider is and is refusing the
+        // action — most often because a manager returned the order to the pool
+        // between two polls. This used to arrive as UnauthorizedError and sign
+        // the rider out mid-shift with "your session has expired", which was
+        // false and cost them their PIN and a working signal to get back in.
+        Alert.alert('Not yours to change', error.message);
+        await refreshDashboard();
         return;
       }
       if (error instanceof OfflineError) {
@@ -293,8 +508,18 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
 
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={onLogout} style={styles.iconButton}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
+          {/* Was a bare back-arrow: unlabelled, unconfirmed, and the only
+              logout in the app. Every other app on the phone has trained the
+              rider that a back-arrow goes back, so they tap it, are signed out
+              instantly, and need their PIN and a working signal to get back
+              in — possibly with a delivery in their hand. */}
+          <TouchableOpacity
+            onPress={confirmSignOut}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+          >
+            <Ionicons name="log-out-outline" size={22} color="#fff" />
           </TouchableOpacity>
           <View>
             <Text style={styles.headerTitle}>eDawr Rider Console</Text>
@@ -391,6 +616,15 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
                     <Ionicons name="location-outline" size={16} color="#64748b" />
                     <Text style={styles.metaText}>{activeOrder.customer_address}</Text>
                   </View>
+                  {/* Collected at checkout specifically to make a 15-minute
+                      delivery likelier, then never shown to the one person who
+                      needs it. In Aizawl the landmark is how you find the door. */}
+                  {activeOrder.customer_landmark ? (
+                    <View style={styles.metaRow}>
+                      <Ionicons name="flag-outline" size={16} color="#64748b" />
+                      <Text style={styles.metaText}>{activeOrder.customer_landmark}</Text>
+                    </View>
+                  ) : null}
                   <TouchableOpacity
                     style={styles.metaRow}
                     onPress={() => callCustomer(activeOrder.customer_phone)}
@@ -426,14 +660,50 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
                     </View>
                   </View>
 
+                  {/* The single most valuable thing a delivery app does, and
+                      the app was throwing away the coordinates it needed. Falls
+                      back to searching the typed address when the customer did
+                      not share a position — which is now a real, distinguishable
+                      state rather than the store's own coordinates. */}
+                  <TouchableOpacity
+                    style={styles.navigateButton}
+                    onPress={() => openDirections(activeOrder)}
+                  >
+                    <Ionicons name="navigate" size={18} color="#4169E1" />
+                    <Text style={styles.navigateButtonText}>Navigate</Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.completeButton, submittingId === activeOrder.id && styles.actionDisabled]}
                     disabled={submittingId === activeOrder.id}
-                    onPress={() => submitDecision(activeOrder.id, 'status', 'Delivered')}
+                    onPress={() => confirmDelivered(activeOrder)}
                   >
                     <Ionicons name="checkmark-done-circle" size={18} color="#fff" />
                     <Text style={styles.completeButtonText}>Mark Delivered</Text>
                   </TouchableOpacity>
+
+                  {/* The two exits that did not exist. A rider whose drop could
+                      not be completed had one button — "Mark Delivered" — which
+                      records the goods as sold and paid for and never returns
+                      the stock. */}
+                  <View style={styles.secondaryRow}>
+                    <TouchableOpacity
+                      style={[styles.secondaryButton, submittingId === activeOrder.id && styles.actionDisabled]}
+                      disabled={submittingId === activeOrder.id}
+                      onPress={() => confirmHandBack(activeOrder)}
+                    >
+                      <Ionicons name="return-up-back" size={16} color="#475569" />
+                      <Text style={styles.secondaryButtonText}>Hand back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.dangerButton, submittingId === activeOrder.id && styles.actionDisabled]}
+                      disabled={submittingId === activeOrder.id}
+                      onPress={() => confirmFailed(activeOrder)}
+                    >
+                      <Ionicons name="close-circle-outline" size={16} color="#b91c1c" />
+                      <Text style={styles.dangerButtonText}>Could not deliver</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ) : (
                 <View style={styles.emptyActiveCard}>
@@ -778,6 +1048,67 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '800',
+  },
+  // The route out, styled as an outline so it reads as a tool rather than as a
+  // step in the flow — it is pressed many times per drop, unlike the three
+  // terminal actions below it.
+  navigateButton: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#4169E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  navigateButtonText: {
+    color: '#4169E1',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  // Hand back and Could-not-deliver sit below Mark Delivered and are visually
+  // quieter. Both are legitimate outcomes and neither should be the easy tap:
+  // the common case is a completed drop, and the rare cases should take a
+  // deliberate look.
+  secondaryRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  secondaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  secondaryButtonText: {
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dangerButton: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    backgroundColor: '#fef2f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  dangerButtonText: {
+    color: '#b91c1c',
+    fontSize: 13,
+    fontWeight: '700',
   },
   completeButton: {
     marginTop: 10,

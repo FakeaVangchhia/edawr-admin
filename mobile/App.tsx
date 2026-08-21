@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { fetchRiderSession } from './src/api';
+import { UnauthorizedError, fetchRiderSession } from './src/api';
 import DeliveryScreen from './src/screens/DeliveryScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import { clearToken, loadToken, saveToken } from './src/session';
@@ -17,6 +17,18 @@ export default function App() {
   // rather than trusting it matters: the token may have expired, or the rider
   // may have been deactivated since, and finding that out here is far better
   // than on their first tap of Accept.
+  //
+  // **The catch is narrow, and that is the whole point of this block.** It used
+  // to be a bare `catch { clearToken() }`, and `api.ts` turns every fetch
+  // rejection — including the 15-second timeout — into `OfflineError`. So a
+  // rider opening the app in a stairwell, a basement, or the road out of
+  // Aizawl had their SecureStore credential permanently deleted, and could not
+  // sign back in either, because logging in also needs the network. A dead spot
+  // became a hard lockout that only the manager could undo.
+  //
+  // Only `UnauthorizedError` — a real 401, meaning the server looked at the
+  // token and rejected it — ends the session. Anything else keeps the token and
+  // lets the rider try again when they have signal.
   useEffect(() => {
     let cancelled = false;
 
@@ -27,12 +39,18 @@ export default function App() {
           const restored = await fetchRiderSession(token);
           if (!cancelled) {
             setSession(restored);
+            // /rider/me returns a fresh token; keep the stored one rolling so a
+            // rider who opens the app regularly is never logged out mid-shift.
+            // Inside the guard: writing after unmount is a write nothing reads.
+            await saveToken(restored.access_token);
           }
-          // /rider/me returns a fresh token; keep the stored one rolling so a
-          // rider who opens the app regularly is never logged out mid-shift.
-          await saveToken(restored.access_token);
-        } catch {
-          await clearToken();
+        } catch (caught) {
+          if (caught instanceof UnauthorizedError) {
+            await clearToken();
+          }
+          // Otherwise the token stays. The rider lands on the login screen for
+          // this launch, but their credential survives, so the next launch with
+          // signal restores them without a PIN.
         }
       }
       if (!cancelled) {

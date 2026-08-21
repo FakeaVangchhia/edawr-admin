@@ -39,8 +39,33 @@ function buildExpoLanUrl(): string | null {
   return host ? `http://${host}:${DEFAULT_PORT}` : null;
 }
 
+/**
+ * Addresses that are meaningless on a phone.
+ *
+ * A device can never reach the *computer's* loopback, so any of these as an
+ * override is treated as unset rather than obeyed. `10.0.2.2` is the Android
+ * emulator's alias for the host machine and `::1` is IPv6 loopback; both used
+ * to slip through and produce a build that fails every request on real hardware.
+ */
 function isLocalhostUrl(url?: string | null): boolean {
-  return !!url && /localhost|127\.0\.0\.1/i.test(url);
+  return !!url && /(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.0\.2\.2)/i.test(url);
+}
+
+/**
+ * Whether a URL would send the rider's PIN and bearer token in the clear.
+ *
+ * The old guard rejected only localhost, so `http://203.0.113.9:8000` sailed
+ * through and shipped a release build that transmits credentials in plaintext
+ * over whatever network the rider is on. Android would then refuse those
+ * requests anyway — cleartext is off by default since Android 9 — so the result
+ * was an app that is both insecure by intent and broken in practice, failing
+ * with a network error that says nothing about why.
+ *
+ * Allowed in development, where the dev server is plain HTTP on a LAN by
+ * design.
+ */
+function isInsecureUrl(url: string): boolean {
+  return /^http:\/\//i.test(url);
 }
 
 function stripTrailingSlash(url: string): string {
@@ -52,10 +77,22 @@ function stripTrailingSlash(url: string): string {
 const envApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
 const configuredApiUrl = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl?.trim();
 
+function rejectInsecure(url: string, source: string): string {
+  if (!__DEV__ && isInsecureUrl(url)) {
+    throw new Error(
+      `eDawr: ${source} is an http:// URL (${url}). A release build must use ` +
+        'https:// — the rider PIN and bearer token would otherwise cross the ' +
+        'network in plaintext, and Android blocks cleartext by default so every ' +
+        'request would fail regardless.',
+    );
+  }
+  return url;
+}
+
 function resolveApiUrl(): string {
   // 1. An explicit build-time override always wins.
   if (envApiUrl && !isLocalhostUrl(envApiUrl)) {
-    return envApiUrl;
+    return rejectInsecure(envApiUrl, 'EXPO_PUBLIC_API_URL');
   }
 
   // 2. In development, follow the Expo dev server back to this machine's LAN
@@ -69,7 +106,7 @@ function resolveApiUrl(): string {
 
   // 3. A released build reads its backend from app.json's `expo.extra.apiUrl`.
   if (configuredApiUrl && !isLocalhostUrl(configuredApiUrl)) {
-    return configuredApiUrl;
+    return rejectInsecure(configuredApiUrl, 'expo.extra.apiUrl in app.json');
   }
 
   // 4. Nothing configured. In development localhost is a reasonable guess (the
