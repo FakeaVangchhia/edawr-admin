@@ -30,11 +30,15 @@ import type { DeliveryType } from '@/types';
 /**
  * The basket.
  *
- * Line prices come from the catalogue snapshot in the cart store and are shown
- * per unit, unmultiplied. **No line total is computed here** — the only totals
- * on this page are the server's, from `useQuote`. A "₹62 × 3 = ₹186" column
+ * **No line total is computed here.** Every figure on this page is the
+ * server's, from `useQuote`. A `price × quantity` column written in TypeScript
  * would be a second pricing engine doing arithmetic in floats, which is exactly
  * what `api/pricing.py` exists to prevent.
+ *
+ * The row totals now come from `quote.lines`, which `BasketQuoteSerializer`
+ * added for this. Before that field existed the page could only show a per-unit
+ * price and leave the customer to multiply — the rule was being followed by
+ * showing less, because the server had the number and was throwing it away.
  *
  * The chosen tier lives here rather than in the checkout page because it
  * changes the bill the customer is looking at right now, and it is carried
@@ -45,6 +49,14 @@ export function CartPage() {
   const config = useStoreConfig();
   const [deliveryType, setDeliveryType] = useState<DeliveryType>(DEFAULT_DELIVERY_TYPE);
   const { quote, isLoading, error } = useQuote(lines, deliveryType);
+
+  // Row totals, keyed by product, exactly as the server quantised them. Empty
+  // while a quote is in flight, which is why the render below falls back to the
+  // per-unit price rather than to a locally computed product.
+  const lineTotals = new Map(
+    (quote?.lines ?? []).map((row) => [row.product_id, row.line_total]),
+  );
+  const storeClosed = config ? !config.is_open : false;
 
   if (!hydrated) return <CartSkeleton />;
 
@@ -68,7 +80,8 @@ export function CartPage() {
     );
   }
 
-  const canCheckout = Boolean(quote?.meets_minimum) && quote?.unavailable.length === 0;
+  const canCheckout =
+    Boolean(quote?.meets_minimum) && quote?.unavailable.length === 0 && !storeClosed;
   const unavailableIds = new Set(quote?.unavailable.map((item) => item.product_id) ?? []);
 
   return (
@@ -132,6 +145,11 @@ export function CartPage() {
                     {formatMoney(line.product.price)}
                     {line.product.unit ? ` · ${line.product.unit}` : ''}
                   </p>
+                  {lineTotals.has(line.product.id) && (
+                    <p className="num mt-0.5 text-[13px] font-semibold">
+                      {formatMoney(lineTotals.get(line.product.id)!)}
+                    </p>
+                  )}
                   {unavailable && (
                     <p className="mt-1 text-xs font-medium text-destructive">
                       {quote?.unavailable.find((item) => item.product_id === line.product.id)
@@ -204,6 +222,22 @@ export function CartPage() {
             <FreeDeliveryNudge quote={quote} />
             <MinimumOrderNotice quote={quote} config={config} />
 
+            {storeClosed && (
+              <div
+                role="status"
+                className="mt-4 rounded-2xl bg-amber-soft px-4 py-3 text-sm text-amber"
+              >
+                <p className="font-semibold">The store is closed</p>
+                {/* The server's own sentence — the same one checkout would
+                    refuse with. Two implementations of "are we open?" is how a
+                    shop shows one message and enforces another. */}
+                <p className="mt-1">{config?.closed_reason}</p>
+                <p className="mt-1 text-xs">
+                  Your basket is saved and will still be here when we open.
+                </p>
+              </div>
+            )}
+
             <Link
               href={`/checkout?tier=${deliveryType}`}
               aria-disabled={!canCheckout}
@@ -217,8 +251,8 @@ export function CartPage() {
                   : 'pointer-events-none opacity-50',
               )}
             >
-              Checkout
-              <ArrowRight className="size-4" aria-hidden />
+              {storeClosed ? 'Store closed' : 'Checkout'}
+              {!storeClosed && <ArrowRight className="size-4" aria-hidden />}
             </Link>
           </div>
         </aside>
@@ -237,8 +271,10 @@ export function CartPage() {
             !canCheckout && 'pointer-events-none opacity-50',
           )}
         >
-          Checkout
-          {quote && <span className="num">· {formatMoney(quote.grand_total)}</span>}
+          {storeClosed ? 'Store closed' : 'Checkout'}
+          {!storeClosed && quote && (
+            <span className="num">· {formatMoney(quote.grand_total)}</span>
+          )}
         </Link>
       </div>
     </div>

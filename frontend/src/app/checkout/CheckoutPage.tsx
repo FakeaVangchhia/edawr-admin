@@ -6,16 +6,23 @@
    time, which would mean baking the API host into the bundle — the one thing
    `lib/api.ts` exists to avoid. Plain <img> it is. */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Banknote, Check, Loader2, MapPin, Plus } from 'lucide-react';
+import { Banknote, Check, Crosshair, Loader2, MapPin, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiError, assetUrl } from '@/lib/api';
 import { addAddress, selectAddress, selectedAddress, toDeliveryAddress } from '@/lib/addresses';
 import { clearCart } from '@/lib/cart-store';
 import { DEFAULT_DELIVERY_TYPE } from '@/lib/delivery';
 import { formatMoney } from '@/lib/format';
+import {
+  GEOLOCATION_MESSAGES,
+  distanceFromStore,
+  isDeliverable,
+  requestPosition,
+  type Coordinates,
+} from '@/lib/geolocation';
 import { saveProfile } from '@/lib/profile';
 import { rememberOrder } from '@/lib/recent-orders';
 import { placeOrder } from '@/lib/store-api';
@@ -78,8 +85,42 @@ export function CheckoutPage() {
   const [failure, setFailure] = useState('');
   const [unavailable, setUnavailable] = useState<UnavailableItem[]>([]);
 
+  // The customer's position, if they chose to share it. `null` is a supported
+  // final state, not a pending one — see lib/geolocation.ts.
+  const [coords, setCoords] = useState<Coordinates | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationNote, setLocationNote] = useState('');
+
+  // Guards the state writes after `await placeOrder`. The 409 path calls
+  // `setUnavailable` and `setFailure` after a round trip the customer may have
+  // navigated away from, and React drops those writes on an unmounted tree —
+  // taking the backend's actual sentence ("Some items are no longer available:
+  // Amul Taaza Milk.") with them.
+  const mounted = useRef(true);
+
+  // Flips on unmount, and every state write after an `await` below is guarded by
+  // it. Declared above the early returns because hooks cannot be conditional.
+  //
+  // `mounted` starts true rather than being set in the effect: React 19 in
+  // StrictMode mounts, unmounts and remounts, and an effect that only ever sets
+  // `true` on mount would leave the ref false through the second render.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const { quote, isLoading, error } = useQuote(lines, deliveryType);
   const saved = selectedAddress(book);
+
+  const outsideArea = isDeliverable(coords, config) === false;
+  const distanceKm = distanceFromStore(coords, config);
+  // `is_open` is false while the shop is shut or a manager has paused orders.
+  // Checked here as well as on the cart because a customer can sit on this page
+  // through a closing time, and because the server will refuse anyway — this is
+  // what stops them finding that out after filling in the whole form.
+  const storeClosed = config ? !config.is_open : false;
 
   if (!hydrated) return <CheckoutSkeleton />;
 
@@ -119,6 +160,25 @@ export function CheckoutPage() {
     return Object.keys(next).length === 0;
   };
 
+  const locate = async () => {
+    if (isLocating) return;
+    setIsLocating(true);
+    setLocationNote('');
+
+    const { coords: found, failure: why } = await requestPosition();
+    if (!mounted.current) return;
+
+    if (found) {
+      setCoords(found);
+      setLocationNote('');
+    } else if (why) {
+      // Never an error state. The address field is the real input and this is a
+      // hint layered on it, so the copy says so rather than demanding a retry.
+      setLocationNote(GEOLOCATION_MESSAGES[why]);
+    }
+    setIsLocating(false);
+  };
+
   const submit = async () => {
     if (isPlacing) return;
     setFailure('');
@@ -135,6 +195,15 @@ export function CheckoutPage() {
           customer_address: effectiveAddress.trim(),
           customer_landmark: effectiveLandmark.trim(),
           delivery_notes: notes.trim(),
+          // Sent as a pair or not at all: the server rejects half a position,
+          // because latitude without longitude is a client bug rather than a
+          // partial answer.
+          ...(coords
+            ? {
+                customer_latitude: coords.latitude,
+                customer_longitude: coords.longitude,
+              }
+            : {}),
         },
         deliveryType,
       );
@@ -149,13 +218,19 @@ export function CheckoutPage() {
         itemCount: order.items.length,
       });
       saveProfile({ name: name.trim(), phone: phone.trim() });
-      clearCart();
 
       toast.success('Order placed', {
         description: `Arriving in about ${order.promised_minutes} minutes`,
       });
+      // Navigate first, empty the basket second. The other order re-renders this
+      // page through the `lines.length === 0` branch above, so the customer sees
+      // "Nothing to check out" flash over a successful order while the router
+      // is still working.
       router.push(`/order/${order.tracking_token}`);
+      clearCart();
     } catch (caught: unknown) {
+      if (!mounted.current) return;
+
       // A 409 means the catalogue moved under a basket that was valid when it
       // was built. Naming the exact rows is the difference between a customer
       // fixing it in one tap and a customer giving up.
@@ -172,7 +247,12 @@ export function CheckoutPage() {
     }
   };
 
-  const blocked = unavailable.length > 0 || quote?.meets_minimum === false;
+
+  const blocked =
+    unavailable.length > 0 ||
+    quote?.meets_minimum === false ||
+    storeClosed ||
+    outsideArea;
 
   return (
     <div className="container-page py-8 pb-32 lg:py-12 lg:pb-12">
@@ -272,6 +352,47 @@ export function CheckoutPage() {
                 error={errors.address}
                 autoComplete="street-address"
               />
+            </div>
+
+            <div className="mt-4 rounded-3xl bg-surface p-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={locate}
+                  disabled={isLocating || isPlacing}
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-semibold transition-colors hover:bg-background disabled:pointer-events-none disabled:opacity-60"
+                >
+                  {isLocating ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Crosshair className="size-4" aria-hidden />
+                  )}
+                  {coords ? 'Update my location' : 'Share my location'}
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  Optional. It helps the rider find you and lets us check we
+                  deliver to your area.
+                </p>
+              </div>
+
+              {/* Always mounted, text swapped. A conditionally rendered
+                  aria-live region is inserted at the same moment its content
+                  first changes, and most screen readers announce nothing at
+                  all — the region has to already exist to be watched. */}
+              <p
+                role="status"
+                aria-live="polite"
+                className={cn(
+                  'mt-2 min-h-4 text-xs',
+                  outsideArea ? 'font-medium text-destructive' : 'text-muted-foreground',
+                )}
+              >
+                {outsideArea
+                  ? `That is about ${distanceKm} km from the store, outside the ${config?.delivery_radius_km} km delivery area.`
+                  : coords
+                    ? `Location shared${distanceKm !== null ? ` · ${distanceKm} km from the store` : ''}.`
+                    : locationNote}
+              </p>
             </div>
 
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -400,6 +521,22 @@ export function CheckoutPage() {
 
             <MinimumOrderNotice quote={quote} config={config} />
 
+            {storeClosed && (
+              <div
+                role="status"
+                className="rounded-2xl bg-amber-soft px-4 py-3 text-sm text-amber"
+              >
+                <p className="font-semibold">The store is closed</p>
+                {/* The server's own sentence, so what is shown here and what
+                    checkout would refuse with cannot drift apart. */}
+                <p className="mt-1">{config?.closed_reason}</p>
+                <p className="mt-1 text-xs">
+                  Your basket is saved. Come back when we open and it will still
+                  be here.
+                </p>
+              </div>
+            )}
+
             {failure && (
               <div className="rounded-2xl bg-destructive-soft px-4 py-3 text-sm text-destructive">
                 <p>{failure}</p>
@@ -418,8 +555,10 @@ export function CheckoutPage() {
               className="hidden h-13 w-full items-center justify-center gap-2 rounded-full bg-primary text-base font-semibold text-primary-foreground transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:shadow-lift disabled:pointer-events-none disabled:opacity-60 lg:flex"
             >
               {isPlacing && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              {isPlacing ? 'Placing order…' : 'Place order'}
-              {!isPlacing && quote && <span className="num">· {formatMoney(quote.grand_total)}</span>}
+              {isPlacing ? 'Placing order…' : storeClosed ? 'Store closed' : 'Place order'}
+              {!isPlacing && !storeClosed && quote && (
+                <span className="num">· {formatMoney(quote.grand_total)}</span>
+              )}
             </button>
           </div>
         </aside>
@@ -433,8 +572,10 @@ export function CheckoutPage() {
           className="flex h-13 w-full items-center justify-center gap-2 rounded-full bg-primary text-base font-semibold text-primary-foreground transition-transform duration-300 ease-[var(--ease-apple)] active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
         >
           {isPlacing && <Loader2 className="size-4 animate-spin" aria-hidden />}
-          {isPlacing ? 'Placing order…' : 'Place order'}
-          {!isPlacing && quote && <span className="num">· {formatMoney(quote.grand_total)}</span>}
+          {isPlacing ? 'Placing order…' : storeClosed ? 'Store closed' : 'Place order'}
+          {!isPlacing && !storeClosed && quote && (
+            <span className="num">· {formatMoney(quote.grand_total)}</span>
+          )}
         </button>
       </div>
     </div>

@@ -37,7 +37,15 @@ export function useQuote(lines: CartLine[], deliveryType: DeliveryType): QuoteSt
     const controller = new AbortController();
 
     quoteBasket(lines, deliveryType, controller.signal)
-      .then((quote) => setState({ signature, quote, error: '' }))
+      .then((quote) => {
+        // The catch below checks this and the success path did not, so a quote
+        // that resolved after the basket changed still wrote itself into state.
+        // It was mostly invisible because `signature` is compared on render and
+        // a stale entry is ignored — but it is a write to an unmounted tree the
+        // moment the customer leaves the page mid-request.
+        if (controller.signal.aborted) return;
+        setState({ signature, quote, error: '' });
+      })
       .catch((caught: unknown) => {
         if (controller.signal.aborted) return;
         setState({

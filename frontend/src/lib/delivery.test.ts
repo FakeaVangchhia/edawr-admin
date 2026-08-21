@@ -40,6 +40,13 @@ function config(overrides: Partial<StoreConfig> = {}): StoreConfig {
     min_order_value: 49,
     promise_minutes: 15,
     delivery_fee: 15,
+    is_open: true,
+    closed_reason: '',
+    opens_at: '07:00:00',
+    closes_at: '22:00:00',
+    delivery_radius_km: 8,
+    store_latitude: 23.7272,
+    store_longitude: 92.7178,
     ...overrides,
   };
 }
@@ -53,6 +60,7 @@ function quote(overrides: Partial<BasketQuote> = {}): BasketQuote {
     free_delivery_shortfall: 99,
     meets_minimum: true,
     unavailable: [],
+    lines: [],
     delivery_type: 'instant',
     promised_minutes: 15,
     ...overrides,

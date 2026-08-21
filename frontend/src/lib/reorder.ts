@@ -1,4 +1,4 @@
-import { fetchProducts, trackOrder } from './store-api';
+import { fetchAllProducts, trackOrder } from './store-api';
 import type { CartLine, OrderItem, StoreProduct } from '@/types';
 
 /**
@@ -15,9 +15,6 @@ import type { CartLine, OrderItem, StoreProduct } from '@/types';
  * are resolved against the live catalogue, and anything that cannot be resolved
  * is reported rather than quietly dropped.
  */
-
-/** Matches STORE_MAX_PAGE_SIZE in the backend settings. */
-const CATALOGUE_LIMIT = 200;
 
 export interface ReorderResult {
   /** Resolved against live catalogue rows, ready to merge into the cart. */
@@ -66,9 +63,13 @@ export function resolveReorder(
  * Fetch a past order and the current catalogue, and resolve one against the other.
  *
  * The whole catalogue is fetched rather than the specific ids because the store
- * API has no by-ids endpoint and a dark store's catalogue is a few hundred rows
- * — one request either way. Revisit if the catalogue outgrows CATALOGUE_LIMIT,
- * at which point this silently stops finding the tail of it.
+ * API has no by-ids endpoint and a dark store's catalogue is a few hundred rows.
+ *
+ * `fetchAllProducts` pages, and that matters here more than anywhere else in the
+ * app. This used to ask for a single 200-row page — the server's maximum — so
+ * any product past position 200 was absent from the map below and reported to
+ * the customer as **delisted**: a product still on sale, described as
+ * discontinued, on the screen whose whole purpose is re-buying it.
  */
 export async function buildReorder(
   token: string,
@@ -76,7 +77,7 @@ export async function buildReorder(
 ): Promise<ReorderResult> {
   const [order, catalogue] = await Promise.all([
     trackOrder(token, signal),
-    fetchProducts({ limit: CATALOGUE_LIMIT }, signal),
+    fetchAllProducts(signal),
   ]);
 
   return resolveReorder(order.items, catalogue);

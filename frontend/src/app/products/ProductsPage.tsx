@@ -26,17 +26,34 @@ import type { StoreCategory, StoreProduct } from '@/types';
 const PAGE_SIZE = 60;
 const ALL = 'All';
 
+/**
+ * The loaded grid, tagged with the exact request that produced it.
+ *
+ * `key` is `aisle|page` rather than just the aisle, because paging adds a
+ * second axis a response can be stale on: switching aisle while a "load more"
+ * is in flight would otherwise append page 2 of Dairy under the Snacks heading.
+ *
+ * `exhausted` is what makes the count honest. A short page is the only
+ * end-of-list signal the endpoint gives, so until one arrives the page knows it
+ * has *at least* this many items and must not claim it has all of them.
+ */
 interface Loaded {
+  key: string;
   aisle: string;
   products: StoreProduct[];
   error: string;
+  exhausted: boolean;
 }
+
+const keyFor = (aisle: string, page: number) => `${aisle}|${page}`;
 
 export function ProductsPage({ initialCategory }: { initialCategory?: string }) {
   const [aisle, setAisle] = useState(initialCategory ?? ALL);
   const [sort, setSort] = useState<SortKey>('recommended');
   const [categories, setCategories] = useState<StoreCategory[]>([]);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // Bumped from the "Load more" handler, never from inside an effect.
+  const [page, setPage] = useState(0);
   const promiseMinutes = usePromiseMinutes();
 
   useEffect(() => {
@@ -51,24 +68,57 @@ export function ProductsPage({ initialCategory }: { initialCategory?: string }) 
 
   useEffect(() => {
     const controller = new AbortController();
+    const key = keyFor(aisle, page);
 
-    fetchProducts({ category: aisle, limit: PAGE_SIZE }, controller.signal)
-      .then((products) => setLoaded({ aisle, products, error: '' }))
+    fetchProducts(
+      { category: aisle, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+      controller.signal,
+    )
+      .then((batch) => {
+        if (controller.signal.aborted) return;
+        setLoaded((previous) => {
+          // Page 0 replaces; a later page appends, but only onto the page
+          // immediately before it in the same aisle. Anything else is a
+          // response that outlived the state it belonged to.
+          const carry =
+            page > 0 && previous?.key === keyFor(aisle, page - 1) ? previous.products : [];
+          return {
+            key,
+            aisle,
+            products: [...carry, ...batch],
+            error: '',
+            // A short page is the end of the list. Asking for 60 and getting 60
+            // means there may be more; it never means there are not.
+            exhausted: batch.length < PAGE_SIZE,
+          };
+        });
+      })
       .catch((caught: unknown) => {
         if (controller.signal.aborted) return;
         setLoaded({
+          key,
           aisle,
           products: [],
           error: caught instanceof Error ? caught.message : 'Could not load the catalogue.',
+          exhausted: true,
         });
       });
 
     return () => controller.abort();
-  }, [aisle]);
+  }, [aisle, page]);
 
-  const current = loaded?.aisle === aisle ? loaded : null;
+  const current = loaded?.key === keyFor(aisle, page) ? loaded : null;
   const isLoading = current === null;
   const products = current ? sortProducts(current.products, sort) : [];
+  const hasMore = Boolean(current && !current.exhausted);
+
+  const changeAisle = (next: string) => {
+    setAisle(next);
+    // Back to the top of the new aisle. Without this, switching filters while
+    // on page 3 asks for offset 180 of a category that may have twelve rows and
+    // renders an empty grid.
+    setPage(0);
+  };
 
   return (
     <div className="container-page py-10 lg:py-16">
@@ -78,21 +128,25 @@ export function ProductsPage({ initialCategory }: { initialCategory?: string }) 
       </p>
 
       <div className="no-scrollbar -mx-5 mt-8 flex gap-2 overflow-x-auto px-5 lg:mx-0 lg:flex-wrap lg:px-0">
-        <FilterChip label="All" active={aisle === ALL} onClick={() => setAisle(ALL)} />
+        <FilterChip label="All" active={aisle === ALL} onClick={() => changeAisle(ALL)} />
         {categories.map((category) => (
           <FilterChip
             key={category.name}
             label={category.name}
             count={category.product_count}
             active={aisle === category.name}
-            onClick={() => setAisle(category.name)}
+            onClick={() => changeAisle(category.name)}
           />
         ))}
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <p className="num text-sm text-muted-foreground">
-          {isLoading ? 'Loading…' : `${products.length} ${products.length === 1 ? 'item' : 'items'}`}
+          {isLoading
+            ? 'Loading…'
+            : `${hasMore ? `${products.length}+` : products.length} ${
+                products.length === 1 ? 'item' : 'items'
+              }`}
         </p>
 
         <label className="flex items-center gap-2 text-sm">
@@ -122,6 +176,18 @@ export function ProductsPage({ initialCategory }: { initialCategory?: string }) 
           emptyBody="Nothing is in stock here right now. Try another aisle."
         />
       </div>
+
+      {hasMore && (
+        <div className="mt-10 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setPage((current) => current + 1)}
+            className="inline-flex h-12 items-center rounded-full border border-border px-7 text-sm font-semibold transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:shadow-lift"
+          >
+            Load more
+          </button>
+        </div>
+      )}
     </div>
   );
 }

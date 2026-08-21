@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the annotated template. `.env*` swallowed it, so a fresh clone had
+# no .env.example at all while README.md still said to copy it — and the one
+# variable in it is the one whose absence blocks every request and every product
+# image. admin/.gitignore has carried this negation all along.
+!.env.example
 
 # vercel
 .vercel

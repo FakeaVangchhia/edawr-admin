@@ -40,25 +40,52 @@ export function AddControl({
   const quantity = useCartQuantity(product.id);
   const big = size === 'lg';
 
+  /**
+   * The announcement, and why it lives out here.
+   *
+   * The live region used to be the `<span>` showing the number, inside the
+   * stepper — which only renders once the quantity is non-zero. A region
+   * inserted into the DOM at the same moment its content first changes is not
+   * announced by most screen readers: they watch regions that were already
+   * there. So the first "Add", the one interaction that matters most, said
+   * nothing, and only the second tap onward was read out.
+   *
+   * Rendering it unconditionally next to all three branches below fixes that.
+   * It is visually hidden, so the sighted layout is unchanged.
+   */
+  const announcement =
+    quantity === 0 ? '' : `${product.name}, ${quantity} in basket`;
+
+  const liveRegion = (
+    <span role="status" aria-live="polite" className="sr-only">
+      {announcement}
+    </span>
+  );
+
   // Out of stock disables rather than fails on submit. Letting someone fill a
   // basket the server will reject at checkout wastes the one interaction that
   // actually matters.
   if (!product.in_stock) {
     return (
-      <span
-        className={cn(
-          'inline-flex items-center justify-center rounded-full bg-secondary font-medium text-muted-foreground',
-          big ? 'h-13 px-8 text-base' : 'h-9 px-4 text-xs',
-        )}
-      >
-        Out of stock
-      </span>
+      <>
+        {liveRegion}
+        <span
+          className={cn(
+            'inline-flex items-center justify-center rounded-full bg-secondary font-medium text-muted-foreground',
+            big ? 'h-13 px-8 text-base' : 'h-9 px-4 text-xs',
+          )}
+        >
+          Out of stock
+        </span>
+      </>
     );
   }
 
   if (quantity === 0) {
     return (
-      <button
+      <>
+        {liveRegion}
+        <button
         type="button"
         aria-label={`Add ${product.name} to cart`}
         onClick={(event) => {
@@ -75,12 +102,15 @@ export function AddControl({
         )}
       >
         Add
-      </button>
+        </button>
+      </>
     );
   }
 
   return (
-    <div
+    <>
+      {liveRegion}
+      <div
       className={cn(
         'animate-pop flex items-center justify-between rounded-full bg-primary text-primary-foreground',
         big ? 'h-13 w-40 px-2' : 'h-9 w-24 px-1.5',
@@ -98,7 +128,7 @@ export function AddControl({
       >
         <Minus className="size-4" aria-hidden />
       </button>
-      <span key={quantity} className="animate-pop num text-sm font-semibold" aria-live="polite">
+      <span key={quantity} className="animate-pop num text-sm font-semibold" aria-hidden>
         {quantity}
       </span>
       <button
@@ -113,7 +143,8 @@ export function AddControl({
       >
         <Plus className="size-4" aria-hidden />
       </button>
-    </div>
+      </div>
+    </>
   );
 }
 

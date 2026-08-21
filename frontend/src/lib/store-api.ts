@@ -51,6 +51,38 @@ export function fetchProducts(
 }
 
 /**
+ * Every sellable product, paged until the catalogue runs out.
+ *
+ * `GET /api/store/products` is capped by `STORE_MAX_PAGE_SIZE` (200) server
+ * side, and a caller that asks for more silently gets 200 with no indication
+ * that there were more. That is fine for a grid with a "load more" button and
+ * wrong for anything that needs the *whole* list to decide something — reorder
+ * matched a past order's ids against a single 200-row page and reported every
+ * product past that as **discontinued** to the customer.
+ *
+ * Stops when a page comes back short, which is the only end-of-list signal the
+ * endpoint gives. `PAGE_CAP` is a runaway guard, not a product limit: without
+ * it, a server that ignored `offset` would loop forever.
+ */
+const CATALOGUE_PAGE = 200;
+const PAGE_CAP = 25;
+
+export async function fetchAllProducts(signal?: AbortSignal): Promise<StoreProduct[]> {
+  const all: StoreProduct[] = [];
+
+  for (let page = 0; page < PAGE_CAP; page += 1) {
+    const batch = await fetchProducts(
+      { limit: CATALOGUE_PAGE, offset: page * CATALOGUE_PAGE },
+      signal,
+    );
+    all.push(...batch);
+    if (batch.length < CATALOGUE_PAGE) break;
+  }
+
+  return all;
+}
+
+/**
  * One product, for its own page.
  *
  * A product page reached by a shared link or a reload has no list in memory to
@@ -97,6 +129,22 @@ export interface CheckoutDetails {
   customer_address: string;
   customer_landmark?: string;
   delivery_notes?: string;
+  /**
+   * The customer's position, when they agreed to share it.
+   *
+   * Optional and sent as a pair or not at all — the server rejects half of one,
+   * because latitude without longitude is a client bug rather than a partial
+   * answer. Omitting both is a normal, supported outcome: geolocation is a
+   * browser permission prompt, and someone who declines it still typed an
+   * address a rider can read.
+   *
+   * When present the server checks it against the delivery radius and uses it
+   * to rank riders. When absent the order is stored with NULL coordinates,
+   * which is the honest record — the columns used to default to the store's own
+   * position, which made every such order read as 0.00 km from every rider.
+   */
+  customer_latitude?: number;
+  customer_longitude?: number;
 }
 
 /**

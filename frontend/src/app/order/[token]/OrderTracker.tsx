@@ -191,7 +191,19 @@ export function OrderTracker({ token }: { token: string }) {
           </p>
         </div>
 
+        {/* The one thing on this page that changes on its own.
+            It is polled every ten seconds, so a customer who is not watching
+            the screen — the whole point of a tracking page — got no signal at
+            all that their order had moved. `role="status"` announces the change
+            politely, without stealing focus.
+
+            The element is always mounted and only its text changes. Wrapping it
+            in a condition would put the region into the DOM at the same moment
+            its content first changed, which most screen readers do not
+            announce. */}
         <span
+          role="status"
+          aria-live="polite"
           className={cn(
             'rounded-full px-4 py-2 text-sm font-semibold',
             cancelled && 'bg-destructive-soft text-destructive',
@@ -203,8 +215,18 @@ export function OrderTracker({ token }: { token: string }) {
         </span>
       </div>
 
+      {/* Always mounted, empty when there is nothing wrong. A polling failure
+          on a tracking page is exactly the kind of thing a screen reader user
+          needs told, and exactly the kind of conditionally-rendered region that
+          is never announced. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {state.error ? `${state.error} Showing the last update we received.` : ''}
+      </p>
       {state.error && (
-        <p className="mt-4 rounded-2xl bg-destructive-soft px-4 py-3 text-sm text-destructive">
+        <p
+          aria-hidden
+          className="mt-4 rounded-2xl bg-destructive-soft px-4 py-3 text-sm text-destructive"
+        >
           {state.error} Showing the last update we received.
         </p>
       )}

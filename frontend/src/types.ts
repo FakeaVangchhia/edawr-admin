@@ -87,6 +87,48 @@ export interface StoreConfig {
   promise_minutes: number;
   /** The default tier's fee. Prefer reading `delivery_tiers`. */
   delivery_fee: number;
+
+  /**
+   * Whether the shop will take an order right now — opening hours *and* the
+   * manager's pause switch, resolved server-side into one boolean.
+   *
+   * Read this before the address form, not after it. The alternative is
+   * collecting a basket and a delivery address and only then refusing, which is
+   * the worst moment to tell someone you are closed.
+   */
+  is_open: boolean;
+  /**
+   * Why not, in a sentence written for a customer. Empty when open.
+   *
+   * The same string `POST /api/store/orders` would refuse with, produced by the
+   * same server method — so the message on the cart and the message at checkout
+   * cannot disagree.
+   */
+  closed_reason: string;
+  /** Local wall clock at the store, `HH:MM:SS`. */
+  opens_at: string;
+  closes_at: string;
+
+  /** How far the store delivers, and from where. */
+  delivery_radius_km: number;
+  store_latitude: number;
+  store_longitude: number;
+}
+
+/** One priced row of a quoted basket, as the server computed it. */
+export interface BasketQuoteLine {
+  product_id: number;
+  name: string;
+  quantity: number;
+  price: number;
+  /**
+   * `price × quantity`, quantised server-side.
+   *
+   * The reason this field exists: without it the cart had nowhere to get a row
+   * total from and multiplied in TypeScript, which is the second pricing engine
+   * the whole design forbids. Render this; never compute it.
+   */
+  line_total: number;
 }
 
 export interface UnavailableItem {
@@ -105,6 +147,8 @@ export interface BasketQuote {
   free_delivery_shortfall: number;
   meets_minimum: boolean;
   unavailable: UnavailableItem[];
+  /** Per-row totals, so no client multiplies a price by a quantity. */
+  lines: BasketQuoteLine[];
   /**
    * The tier this bill was actually priced at, echoed back.
    *
@@ -179,10 +223,10 @@ export interface TrackedOrder {
 
 /** The full internal view, for the admin console. */
 export interface Order extends Omit<TrackedOrder, 'rider' | 'can_cancel'> {
-  customer_latitude: number;
-  customer_longitude: number;
+  /** Null when the customer did not share a position. Never the store's own. */
+  customer_latitude: number | null;
+  customer_longitude: number | null;
   delivery_boy_id: number | null;
-  offered_to_delivery_boy_id: number | null;
   offered_distance_km: number | null;
   fulfilment_minutes: number | null;
   rider: RiderSummary | null;
