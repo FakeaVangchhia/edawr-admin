@@ -74,36 +74,100 @@ export function useRecentSearches() {
 }
 
 /**
- * The store's own rules: name, city, delivery tiers, fees, the promise.
+ * The store's own rules: name, city, delivery tiers, fees, the promise — and
+ * whether the shop is open right now.
  *
  * Cached at module scope so the twelve components that want the delivery
- * promise share one request per page load rather than each firing their own.
- * It is configuration, not inventory — it does not change between two renders
- * of the same page, and a stale value costs nothing because **no fee here is
- * ever charged**. Everything that bills the customer comes from
- * `/api/store/quote` and from the order the server creates.
+ * promise share one request rather than each firing their own.
+ *
+ * **The cache has a lifetime, and that is new.** It used to be permanent, on
+ * the reasoning that this is configuration rather than inventory and a stale
+ * fee costs nothing because no fee here is ever charged — every figure that
+ * bills the customer comes from `/api/store/quote`. That reasoning was sound
+ * while the payload was only prices. It stopped being sound when `is_open` and
+ * `closed_reason` joined it: those are live operational state, and a permanent
+ * cache means a customer who loaded the page at 21:55 still sees "Checkout" at
+ * 22:05, fills in the whole address form, and is refused with a 503 at the last
+ * step — the exact failure the closed-store gate exists to prevent. It fails the
+ * other way too: a tab opened while the shop was shut says "Store closed"
+ * forever after it reopens.
+ *
+ * Sixty seconds is chosen against what it is protecting: closing time and a
+ * manager's kill switch during a power cut. A minute of staleness on either is
+ * an acceptable cost; a whole session of it is not.
  */
+const CONFIG_TTL_MS = 60_000;
+
 let cached: StoreConfig | null = null;
+let cachedAt = 0;
+/** Shared between mounted components so a burst of them makes one request. */
+let inFlight: Promise<StoreConfig> | null = null;
+
+function isFresh(): boolean {
+  return cached !== null && Date.now() - cachedAt < CONFIG_TTL_MS;
+}
+
+function loadConfig(signal?: AbortSignal): Promise<StoreConfig> {
+  if (inFlight) return inFlight;
+
+  inFlight = fetchStoreConfig(signal)
+    .then((loaded) => {
+      cached = loaded;
+      cachedAt = Date.now();
+      return loaded;
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+
+  return inFlight;
+}
 
 export function useStoreConfig(): StoreConfig | null {
   const [config, setConfig] = useState<StoreConfig | null>(cached);
+  // Bumped by the interval below. It is a render trigger, not state that
+  // anything reads — the value always comes from the module cache.
+  const [, setTick] = useState(0);
 
   useEffect(() => {
-    if (cached) return;
+    let cancelled = false;
 
-    const controller = new AbortController();
-    fetchStoreConfig(controller.signal)
-      .then((loaded) => {
-        cached = loaded;
-        setConfig(loaded);
-      })
-      .catch(() => {
-        // A store that cannot read its own config still sells. The tier
-        // fallbacks in `lib/delivery.ts` cover the picker, and the bill was
-        // never computed from this in the first place.
-      });
+    const refresh = () => {
+      if (isFresh()) {
+        // Still adopt it: a component mounting inside the window needs the
+        // cached value even though no request is due.
+        if (!cancelled && cached) setConfig(cached);
+        return;
+      }
+      loadConfig()
+        .then((loaded) => {
+          if (!cancelled) setConfig(loaded);
+        })
+        .catch(() => {
+          // A store that cannot read its own config still sells. The tier
+          // fallbacks in `lib/delivery.ts` cover the picker, and the bill was
+          // never computed from this in the first place. Crucially the *last
+          // known* value is kept rather than cleared: a network blip must not
+          // black out the storefront's delivery promise.
+        });
+    };
 
-    return () => controller.abort();
+    refresh();
+
+    // Re-checked on a timer rather than only on mount, because the pages that
+    // care — the cart and checkout — are exactly the ones a customer sits on
+    // without navigating.
+    const timer = setInterval(() => {
+      if (!cancelled) {
+        setTick((n) => n + 1);
+        refresh();
+      }
+    }, CONFIG_TTL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
   return config;

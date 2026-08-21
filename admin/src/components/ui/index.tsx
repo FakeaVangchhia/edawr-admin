@@ -294,6 +294,8 @@ export function ConfirmDialog({
   confirmLabel = 'Confirm',
   destructive,
   busy,
+  /** Blocks Confirm while the dialog's own input is incomplete. */
+  confirmDisabled,
   onConfirm,
   onCancel,
 }: {
@@ -303,6 +305,7 @@ export function ConfirmDialog({
   confirmLabel?: string;
   destructive?: boolean;
   busy?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -344,7 +347,7 @@ export function ConfirmDialog({
             type="button"
             className={clsx('btn', destructive ? 'btn-danger' : 'btn-primary')}
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             autoFocus
           >
             {busy ? 'Working…' : confirmLabel}

@@ -108,9 +108,21 @@ export function ProductsPage({ initialCategory }: { initialCategory?: string }) 
   }, [aisle, page]);
 
   const current = loaded?.key === keyFor(aisle, page) ? loaded : null;
-  const isLoading = current === null;
-  const products = current ? sortProducts(current.products, sort) : [];
-  const hasMore = Boolean(current && !current.exhausted);
+
+  // While a *later* page is in flight, keep showing what is already on screen.
+  //
+  // `current` is null for the whole round trip after "Load more" bumps `page`,
+  // and treating that as `isLoading` made the grid swap sixty rendered products
+  // for a skeleton and then show a hundred and twenty at once — the button
+  // vanishing along with them. A first load has nothing to hold on to and
+  // should still show the skeleton; a subsequent page has everything.
+  const carried = loaded?.aisle === aisle ? loaded : null;
+  const shown = current ?? (page > 0 ? carried : null);
+
+  const isLoading = shown === null;
+  const isLoadingMore = current === null && shown !== null;
+  const products = shown ? sortProducts(shown.products, sort) : [];
+  const hasMore = Boolean(shown && !shown.exhausted);
 
   const changeAisle = (next: string) => {
     setAisle(next);
@@ -181,10 +193,11 @@ export function ProductsPage({ initialCategory }: { initialCategory?: string }) 
         <div className="mt-10 flex justify-center">
           <button
             type="button"
-            onClick={() => setPage((current) => current + 1)}
-            className="inline-flex h-12 items-center rounded-full border border-border px-7 text-sm font-semibold transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:shadow-lift"
+            disabled={isLoadingMore}
+            onClick={() => setPage((currentPage) => currentPage + 1)}
+            className="inline-flex h-12 items-center rounded-full border border-border px-7 text-sm font-semibold transition-all duration-300 ease-[var(--ease-apple)] hover:-translate-y-0.5 hover:shadow-lift disabled:pointer-events-none disabled:opacity-60"
           >
-            Load more
+            {isLoadingMore ? 'Loading…' : 'Load more'}
           </button>
         </div>
       )}

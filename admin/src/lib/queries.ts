@@ -86,17 +86,17 @@ export function createProduct(body: Partial<Product>) {
 }
 
 /**
- * A partial update. **Use this, not `replaceProduct`, for anything the console
- * edits** — it writes only the fields sent, under a row lock, so a sale landing
- * while the editor was open is not overwritten. See the backend's `PATCH`.
+ * The only way to edit a product.
+ *
+ * PATCH writes only the fields sent, under a row lock, so a sale landing while
+ * the editor was open is not overwritten. There is deliberately no
+ * `replaceProduct` beside it any more: `PUT /api/products/{id}` was removed
+ * from the API because a full-row replace writes a stale `stock` back over
+ * concurrent decrements — atomically or otherwise. The helper outlived the
+ * endpoint by one commit and would have returned 405 to whoever called it next.
  */
 export function updateProduct(id: number, body: Partial<Product>) {
   return authRequest<Product>(`/api/products/${id}`, { method: 'PATCH', body });
-}
-
-/** Full replacement. Retained for completeness; prefer `updateProduct`. */
-export function replaceProduct(id: number, body: Partial<Product>) {
-  return authRequest<Product>(`/api/products/${id}`, { method: 'PUT', body });
 }
 
 export function deleteProduct(id: number) {

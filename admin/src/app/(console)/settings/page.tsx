@@ -207,22 +207,37 @@ function OperationsForm({
     setSaved('');
   };
 
-  async function save(overrides: Partial<StoreSettings> = {}) {
+  /** Everything the form owns, as the API wants it. */
+  function wholeForm(): Partial<StoreSettings> {
+    return {
+      is_accepting_orders: draft.is_accepting_orders,
+      closed_message: draft.closed_message,
+      // The API takes `HH:MM` or `HH:MM:SS`; an <input type="time"> gives the
+      // former, and the row comes back as the latter.
+      opens_at: draft.opens_at,
+      closes_at: draft.closes_at,
+      delivery_radius_km: Number(draft.delivery_radius_km),
+      store_latitude: Number(draft.store_latitude),
+      store_longitude: Number(draft.store_longitude),
+    };
+  }
+
+  /**
+   * `body` is exactly what gets sent — no merging with the rest of the form.
+   *
+   * That distinction is the point. The pause switch saves on the click, because
+   * it is the control someone reaches for during a power cut and making them
+   * find a Save button afterwards is how orders keep arriving for another thirty
+   * seconds. But if it sent the whole form, a manager who had half-typed a new
+   * radius ("1" on the way to "12", or an emptied box, which `Number('')` makes
+   * `0`) would silently ship that too — and a zero radius or a zero latitude
+   * changes what checkout accepts. The switch now sends one field.
+   */
+  async function save(body: Partial<StoreSettings>) {
     setBusy(true);
     setError('');
     try {
-      await updateStoreSettings({
-        is_accepting_orders: draft.is_accepting_orders,
-        closed_message: draft.closed_message,
-        // The API takes `HH:MM` or `HH:MM:SS`; an <input type="time"> gives the
-        // former, and the row comes back as the latter.
-        opens_at: draft.opens_at,
-        closes_at: draft.closes_at,
-        delivery_radius_km: Number(draft.delivery_radius_km),
-        store_latitude: Number(draft.store_latitude),
-        store_longitude: Number(draft.store_longitude),
-        ...overrides,
-      });
+      await updateStoreSettings(body);
       setSaved('Saved.');
       onSaved();
     } catch (caught) {
@@ -409,7 +424,12 @@ function OperationsForm({
       </div>
 
       <div className="mt-4 flex items-center gap-2">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => save()}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy}
+          onClick={() => save(wholeForm())}
+        >
           {busy ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : null}
           Save settings
         </button>

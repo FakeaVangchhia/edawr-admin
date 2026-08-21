@@ -5,6 +5,7 @@ import {
   AppState,
   FlatList,
   Linking,
+  Modal,
   Platform,
   RefreshControl,
   SafeAreaView,
@@ -53,6 +54,21 @@ const REFRESH_MS = 15_000;
 
 /** How far the poll backs off while the server is unreachable. */
 const MAX_BACKOFF_MS = 60_000;
+
+/**
+ * Why a delivery did not happen, in the words the store will read later.
+ *
+ * A closed list rather than a text box: the rider is standing at a door, often
+ * in the rain, and these four cover what actually occurs. Each string goes
+ * straight onto `Order.cancellation_reason` and into the audit trail, so they
+ * are written as complete sentences rather than as labels.
+ */
+const FAILURE_REASONS: { label: string; reason: string }[] = [
+  { label: 'Nobody answered', reason: 'Nobody answered at the address' },
+  { label: 'Customer refused it', reason: 'Customer refused the order at the door' },
+  { label: 'Could not find the address', reason: 'Could not find the address' },
+  { label: 'Customer could not pay', reason: 'Customer could not pay the cash amount' },
+];
 
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -358,29 +374,31 @@ This cannot be undone.`,
   /**
    * Report a delivery that was attempted and did not happen.
    *
+   * A modal rather than `Alert.alert`, and that is not a styling preference.
+   * React Native's Android Alert does `buttons.slice(0, 3)` — see
+   * `Libraries/Alert/Alert.js` — so a Cancel plus three reasons silently drops
+   * the third one on the rider's actual platform. A rider who could not find
+   * the address would have been left choosing a reason that was false, which is
+   * precisely the "a lie the till has to absorb" problem this whole feature
+   * exists to remove.
+   *
    * The reason is required by the server, and rightly: it is the sentence the
-   * store reads when the customer rings. `Alert.prompt` is iOS-only, so Android
-   * gets a short list of the reasons that actually occur, which is faster to tap
-   * at a doorstep than typing anyway.
+   * store reads when the customer rings. A tap list beats typing at a doorstep
+   * in the rain, and `Alert.prompt` is iOS-only anyway.
    */
-  const confirmFailed = useCallback(
-    (order: Order) => {
-      const send = (reason: string) => submitDecision(order.id, 'status', 'Failed', reason);
+  const [failing, setFailing] = useState<Order | null>(null);
 
-      Alert.alert(
-        `Could not deliver order #${order.id}?`,
-        'This ends the order without recording a sale. Bring the bag back to the shop — the stock is only returned once it is on the shelf.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Nobody answered', onPress: () => send('Nobody answered at the address') },
-          { text: 'Customer refused', onPress: () => send('Customer refused the order at the door') },
-          { text: 'Address wrong', onPress: () => send('Could not find the address') },
-        ],
-      );
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  const confirmFailed = useCallback((order: Order) => {
+    setFailing(order);
+  }, []);
+
+  const sendFailure = (reason: string) => {
+    const order = failing;
+    setFailing(null);
+    if (order) {
+      submitDecision(order.id, 'status', 'Failed', reason);
+    }
+  };
 
   const submitDecision = async (
     orderId: number,
@@ -764,6 +782,46 @@ This cannot be undone.`,
           }
         />
       )}
+
+      {/* The failed-delivery reason picker. A modal rather than Alert.alert
+          because Android caps an alert at three buttons and silently discards
+          the rest — see confirmFailed. */}
+      <Modal
+        visible={failing !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFailing(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              Could not deliver order #{failing?.id}?
+            </Text>
+            <Text style={styles.modalBody}>
+              This ends the order without recording a sale. Bring the bag back to
+              the shop — the stock is only returned once it is on the shelf.
+            </Text>
+
+            {FAILURE_REASONS.map(({ label, reason }) => (
+              <TouchableOpacity
+                key={reason}
+                style={styles.modalOption}
+                onPress={() => sendFailure(reason)}
+              >
+                <Ionicons name="close-circle-outline" size={16} color="#b91c1c" />
+                <Text style={styles.modalOptionText}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={styles.modalCancel}
+              onPress={() => setFailing(null)}
+            >
+              <Text style={styles.modalCancelText}>Keep trying</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1052,6 +1110,59 @@ const styles = StyleSheet.create({
   // The route out, styled as an outline so it reads as a tool rather than as a
   // step in the flow — it is pressed many times per drop, unlike the three
   // terminal actions below it.
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  modalBody: {
+    marginTop: 6,
+    marginBottom: 14,
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#475569',
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    backgroundColor: '#fef2f2',
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+  },
+  modalOptionText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#b91c1c',
+  },
+  modalCancel: {
+    marginTop: 4,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#475569',
+  },
   navigateButton: {
     marginTop: 12,
     borderRadius: 14,

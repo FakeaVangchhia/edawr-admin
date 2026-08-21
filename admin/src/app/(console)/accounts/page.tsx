@@ -65,10 +65,26 @@ function Accounts() {
   const rows = useMemo(() => accounts.data?.rows ?? [], [accounts.data]);
   const total = accounts.data?.total ?? 0;
 
-  // Mirrors the backend's guard so the UI can explain it in advance.
+  /**
+   * Mirrors the backend's guard so the UI can explain it in advance — and to
+   * mirror it, this has to see **every** Admin, not the page in front of you.
+   *
+   * Derived from `rows` it counted a page. With 30 accounts and the second
+   * active Admin on page 2, page 1 saw one, locked the controls with "This is
+   * the last active Admin", and refused an operation `admins.py` would have
+   * allowed. A guard that is stricter than the rule it mirrors is its own bug:
+   * it teaches the operator that the console is wrong, which is worse than not
+   * warning them at all.
+   *
+   * A separate query, filtered server-side to the Admin role, so it stays small
+   * whatever the roster does.
+   */
+  const adminRoster = useResource('admin-roster', (signal) =>
+    listAccounts({ role: 'admin', limit: 200 }, signal),
+  );
   const activeAdmins = useMemo(
-    () => rows.filter((row) => row.role === 'admin' && row.is_active),
-    [rows],
+    () => (adminRoster.data?.rows ?? []).filter((row) => row.is_active),
+    [adminRoster.data],
   );
 
   function lockReason(account: AdminAccount): string | null {
@@ -90,6 +106,10 @@ function Accounts() {
       setNotice(result.detail ?? `${deactivating.email} can no longer sign in.`);
       setDeactivating(null);
       refresh();
+      // The lock guard reads its own query, so it has to be told too — else
+      // deactivating the second-to-last Admin leaves the last one unlocked
+      // until a reload.
+      adminRoster.refresh();
     } catch (caught) {
       setActionError(errorMessage(caught));
       setDeactivating(null);
@@ -249,6 +269,9 @@ function Accounts() {
             setEditing(null);
             setNotice('');
             refresh();
+            // Creating an Admin, or changing someone's role, changes the answer
+            // to "is this the last one?".
+            adminRoster.refresh();
           }}
         />
       ) : null}

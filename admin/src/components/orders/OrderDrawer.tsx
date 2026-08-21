@@ -61,7 +61,26 @@ export function OrderDrawer({
   const [riderId, setRiderId] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmFail, setConfirmFail] = useState(false);
+  /**
+   * One box, two dialogs — and therefore cleared whenever either opens.
+   *
+   * Without that, a reason typed for a failed delivery survives into the next
+   * Cancel dialog, which opens pre-filled with "Customer refused the order at
+   * the door" and writes it as the cancellation reason on one click. Both
+   * fields are free text that ends up on the order and in the audit log, so a
+   * carried-over sentence is a false record rather than a cosmetic slip.
+   */
   const [reason, setReason] = useState('');
+
+  const openCancel = () => {
+    setReason('');
+    setConfirmCancel(true);
+  };
+
+  const openFail = () => {
+    setReason('');
+    setConfirmFail(true);
+  };
 
   if (!order) return null;
 
@@ -118,7 +137,7 @@ export function OrderDrawer({
                 type="button"
                 className="btn btn-danger"
                 disabled={busy}
-                onClick={() => setConfirmCancel(true)}
+                onClick={openCancel}
               >
                 Cancel order
               </button>
@@ -128,7 +147,7 @@ export function OrderDrawer({
                 type="button"
                 className="btn btn-danger"
                 disabled={busy}
-                onClick={() => setConfirmFail(true)}
+                onClick={openFail}
               >
                 Delivery failed
               </button>
@@ -365,6 +384,9 @@ export function OrderDrawer({
         busy={busy}
         title={`Record order #${order.id} as a failed delivery?`}
         confirmLabel="Record failure"
+        // The API rejects an empty reason with a 400. The copy below says
+        // "Required"; this is what makes it true before a round trip.
+        confirmDisabled={reason.trim().length === 0}
         message={
           <div className="space-y-2">
             <p>

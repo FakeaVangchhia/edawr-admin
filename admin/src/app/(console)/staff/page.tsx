@@ -16,7 +16,7 @@ import {
 } from '@/components/ui';
 import { ApiError, errorMessage } from '@/lib/api';
 import { dateOnly, phone as formatPhone } from '@/lib/format';
-import { createStaff, deleteStaff, listStaff, updateStaff } from '@/lib/queries';
+import { createStaff, deleteStaff, listRiders, listStaff, updateStaff } from '@/lib/queries';
 import { useResource } from '@/lib/use-resource';
 import type { StaffUser } from '@/types';
 
@@ -55,7 +55,26 @@ export default function StaffPage() {
   // array each render, so an unmemoised `rows` makes the memo below pointless.
   const rows = useMemo(() => staff.data?.rows ?? [], [staff.data]);
   const total = staff.data?.total ?? 0;
-  const riders = useMemo(() => rows.filter((row) => row.role === 'delivery'), [rows]);
+
+  /**
+   * The on-duty count comes from the whole roster, not from the visible page.
+   *
+   * `rows` is 25 rows since this table was paginated, so deriving the count
+   * from it under-reports the moment a store has more than 25 staff — and with
+   * the Role filter on "Managers" it reads "0 of 0 riders on duty", which is a
+   * number a manager will act on during a rush. `/api/delivery/riders` returns
+   * the full roster and is unpaged by design.
+   */
+  const roster = useResource('rider-roster', (signal) => listRiders(signal));
+  const riders = useMemo(() => roster.data ?? [], [roster.data]);
+
+  const changeRoleFilter = (next: string) => {
+    setRoleFilter(next);
+    // Back to page one. Without this, a manager on page 3 who narrows the
+    // filter asks for offset 50 of a three-row result, sees an empty table, and
+    // is told "51-3 of 3 staff" underneath it.
+    setOffset(0);
+  };
 
   async function confirmRemove() {
     if (!removing) return;
@@ -100,7 +119,7 @@ export default function StaffPage() {
             id="role-filter"
             className="field w-40"
             value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value)}
+            onChange={(event) => changeRoleFilter(event.target.value)}
           >
             <option value="">Everyone</option>
             <option value="delivery">Riders</option>
