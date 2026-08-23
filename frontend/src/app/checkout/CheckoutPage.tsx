@@ -23,8 +23,9 @@ import {
   requestPosition,
   type Coordinates,
 } from '@/lib/geolocation';
+import { clearCheckoutAttempt } from '@/lib/checkout-attempt';
 import { saveProfile } from '@/lib/profile';
-import { rememberOrder } from '@/lib/recent-orders';
+import { recentOrdersArePersisted, rememberOrder } from '@/lib/recent-orders';
 import { placeOrder } from '@/lib/store-api';
 import { isValidAddress, isValidIndianMobile, isValidName } from '@/lib/validation';
 import {
@@ -229,9 +230,20 @@ export function CheckoutPage() {
         itemCount: order.items.length,
       });
       saveProfile({ name: name.trim(), phone: phone.trim() });
+      // The idempotency key has been redeemed. Leaving it in storage means the
+      // next checkout's first act is reading a spent one, and a used key
+      // lingering in a customer's browser is exactly what confuses whoever is
+      // later debugging a duplicate order.
+      clearCheckoutAttempt();
 
+      // Private browsing and a full quota both make the write throw, and the
+      // order then looks remembered until the next reload loses it. The
+      // customer's only other copy of the token is the URL they are about to be
+      // sent to, so this is the one moment they can be told to keep it.
       toast.success('Order placed', {
-        description: `Arriving in about ${order.promised_minutes} minutes`,
+        description: recentOrdersArePersisted()
+          ? `Arriving in about ${order.promised_minutes} minutes`
+          : 'Save this page — this browser cannot remember your order.',
       });
       // Navigate first, empty the basket second. The other order re-renders this
       // page through the `lines.length === 0` branch above, so the customer sees

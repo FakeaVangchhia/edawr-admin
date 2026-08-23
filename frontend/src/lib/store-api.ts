@@ -1,3 +1,4 @@
+import { basketSignature, checkoutAttemptKey } from './checkout-attempt';
 import { request } from './api';
 import type {
   BasketQuote,
@@ -183,9 +184,22 @@ export function placeOrder(
   details: CheckoutDetails,
   deliveryType: DeliveryType,
 ): Promise<TrackedOrder> {
+  const items = toBasketItems(lines);
+
   return request<TrackedOrder>('/api/store/orders', {
     method: 'POST',
-    body: { ...details, delivery_type: deliveryType, items: toBasketItems(lines) },
+    // A header, not a body field, mirroring the server: the checkout body is
+    // the money boundary and carries product ids and quantities only. See
+    // `lib/checkout-attempt.ts` for why the key is derived from the basket
+    // rather than minted per click.
+    headers: {
+      'Idempotency-Key': checkoutAttemptKey(
+        basketSignature(
+          items.map(({ product_id, quantity }) => ({ productId: product_id, quantity })),
+        ),
+      ),
+    },
+    body: { ...details, delivery_type: deliveryType, items },
   });
 }
 
