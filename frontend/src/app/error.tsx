@@ -2,14 +2,18 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import { reportClientError } from '@/lib/report-error';
 
 /**
  * The route error boundary.
  *
- * It reports to the console and nowhere else. There is no error-reporting
- * endpoint in this project, and `src/proxy.ts` would block a request to a
- * third-party collector anyway — a boundary that silently fails to report is
- * worse than one that never claimed to.
+ * It reports to `POST /api/client-errors`, which is same-origin and already
+ * allowed by `connect-src` — the reason this used to report to the console and
+ * nowhere else was that no such endpoint existed and the CSP would have blocked
+ * a third-party collector. See `api/views/reports.py`.
+ *
+ * The console call stays alongside it: in development nobody is reading the
+ * Django log while clicking around the storefront.
  */
 export default function Error({
   error,
@@ -20,6 +24,12 @@ export default function Error({
 }) {
   useEffect(() => {
     console.error(error);
+    reportClientError({
+      client: 'storefront',
+      message: error.message,
+      digest: error.digest,
+      stack: error.stack,
+    });
   }, [error]);
 
   return (

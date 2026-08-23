@@ -34,6 +34,23 @@ export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const api = apiOrigin();
 
+  /**
+   * Where the browser posts a violation.
+   *
+   * Worth having because every way this policy can be wrong produces the same
+   * symptom — a page that paints and then does nothing — and none of them
+   * reaches a server log. `script-src 'strict-dynamic'` fails silently on a
+   * prerendered route; `img-src` and `connect-src` are built from a build-time
+   * environment variable that can be stale. The first symptom used to be a
+   * phone call.
+   *
+   * Note this needs **no `connect-src` entry**: a violation report is sent by
+   * the browser's own reporting agent, not by page script, so the CSP does not
+   * police it. That is precisely what makes a same-origin collector practical
+   * here when a third-party one would have meant widening the policy.
+   */
+  const reportTo = api ? `${api}/api/csp-report` : '';
+
   const directives = [
     "default-src 'self'",
 
@@ -69,6 +86,13 @@ export function proxy(request: NextRequest) {
     // is the modern directive, that one is for older browsers.
     "frame-ancestors 'none'",
     ...(isDev ? [] : ['upgrade-insecure-requests']),
+
+    // Both spellings, because browsers disagree and neither is going away.
+    // `report-uri` is deprecated and is what Safari and older Chrome send;
+    // `report-to` names a group defined by the `Reporting-Endpoints` header
+    // below and is what current Chrome sends. Listing one would silently lose
+    // half the reports, which is worse than knowing you have no reporting.
+    ...(reportTo ? [`report-uri ${reportTo}`, 'report-to csp-endpoint'] : []),
   ];
 
   const csp = directives.join('; ');
@@ -81,6 +105,11 @@ export function proxy(request: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('Content-Security-Policy', csp);
+  if (reportTo) {
+    // Defines the group `report-to` above refers to. Without this header that
+    // directive names nothing and is ignored.
+    response.headers.set('Reporting-Endpoints', `csp-endpoint="${reportTo}"`);
+  }
   return response;
 }
 
