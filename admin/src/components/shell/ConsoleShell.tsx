@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Banknote,
   BarChart3,
   Boxes,
   ClipboardList,
@@ -24,7 +25,7 @@ import { clsx } from 'clsx';
 
 import { setSessionExpiredHandler } from '@/lib/api';
 import { can, ROLE_LABEL, type Capability } from '@/lib/guard';
-import { verifySession } from '@/lib/queries';
+import { endSession, verifySession } from '@/lib/queries';
 import { clearSession, writeSession } from '@/lib/session';
 import { useSession } from '@/lib/use-session';
 import { useTheme } from '@/lib/use-theme';
@@ -49,6 +50,9 @@ const NAV: NavItem[] = [
   { href: '/categories', label: 'Categories', icon: Tags, capability: 'categories' },
   { href: '/staff', label: 'Staff', icon: Users, capability: 'staff' },
   { href: '/analytics', label: 'Analytics', icon: BarChart3, capability: 'analytics' },
+  // Not Admin-only, and no new capability: reconciling the till is how a
+  // Manager runs the store, the same reasoning that puts Settings here.
+  { href: '/cash', label: 'Cash', icon: Banknote, capability: 'analytics' },
   { href: '/settings', label: 'Settings', icon: Settings, capability: 'settings' },
 ];
 
@@ -134,6 +138,12 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   );
 
   function signOut() {
+    // Fire the server-side revocation, then leave immediately without waiting
+    // for it. Clearing our own copy is the part that must always happen — a
+    // manager on a dropped connection still has to be able to sign out of the
+    // browser in front of them — and `endSession` swallows its own failures
+    // precisely so this ordering is safe.
+    void endSession();
     clearSession();
     router.replace('/login');
   }

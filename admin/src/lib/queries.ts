@@ -14,6 +14,7 @@ import type {
   CategoryShare,
   Category,
   ConsoleSession,
+  CashReconciliation,
   DeliveryPerformance,
   InventoryHealth,
   Order,
@@ -64,6 +65,32 @@ export async function verifySession(): Promise<ConsoleSession> {
     role: data.role,
     accessToken: data.access_token,
   };
+}
+
+/**
+ * Retire this account's tokens server-side.
+ *
+ * Clearing localStorage deletes *our* copy of a credential that keeps working
+ * for another twelve hours in anyone else's — a laptop left open in the shop, a
+ * token lifted by an XSS, a browser profile on a shared machine. This is what
+ * actually ends the session: it increments the account's `token_version`, which
+ * every request compares against, so the token stops being accepted at once.
+ *
+ * Never let it block signing out. A manager tapping "Sign out" on a console
+ * whose network has dropped must still be signed out of that browser, and an
+ * error here would leave them staring at a screen full of their own data. The
+ * local clear happens either way; this is the part that can fail.
+ *
+ * Note it signs out every device this account is using, which is the documented
+ * trade — see the docstring on `AdminUser.token_version`.
+ */
+export async function endSession(): Promise<void> {
+  try {
+    await authRequest<void>('/api/auth/logout', { method: 'POST' });
+  } catch {
+    // Offline, or the token had already expired. Either way there is nothing
+    // useful to say and nothing to retry.
+  }
 }
 
 /* --- products ------------------------------------------------------------ */
@@ -321,6 +348,17 @@ export function analyticsProducts(
 
 export function analyticsCategories(range: Window = {}, signal?: AbortSignal) {
   return authRequest<CategoryShare[]>(`/api/analytics/categories${query({ ...range })}`, { signal });
+}
+
+/**
+ * The till: what each rider owes, and where it does not add up.
+ *
+ * Buckets by when the cash arrived rather than when the order was placed — the
+ * one analytics endpoint that does — so an order placed at 23:50 and delivered
+ * at 00:05 reconciles against the day the money reached the shop.
+ */
+export function analyticsCash(range: Window = {}, signal?: AbortSignal) {
+  return authRequest<CashReconciliation>(`/api/analytics/cash${query({ ...range })}`, { signal });
 }
 
 export function analyticsDelivery(range: Window = {}, signal?: AbortSignal) {

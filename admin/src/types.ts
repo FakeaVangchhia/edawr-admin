@@ -234,6 +234,47 @@ export interface DeliveryPerformance {
   riders: RiderPerformance[];
 }
 
+/**
+ * One rider's till position for the window.
+ *
+ * `rider_id` and `name` are nullable together: an order a manager closed from
+ * the console has no rider at a door, and it still holds cash the store has to
+ * account for. It arrives as one unattributed row rather than being dropped —
+ * a missing row is how money goes missing quietly.
+ */
+export interface CashRider {
+  rider_id: number | null;
+  name: string | null;
+  orders: number;
+  expected: number;
+  collected: number;
+  shortfall: number;
+  short_orders: number;
+}
+
+export interface CashDay {
+  day: string;
+  orders: number;
+  expected: number;
+  collected: number;
+  shortfall: number;
+}
+
+/**
+ * Every figure comes in a pair. `expected` is what the orders were worth,
+ * `collected` is what the rider says they took, and `shortfall` is the gap —
+ * the only number anyone needs to look at twice.
+ */
+export interface CashReconciliation {
+  orders: number;
+  expected: number;
+  collected: number;
+  shortfall: number;
+  short_orders: number;
+  riders: CashRider[];
+  days: CashDay[];
+}
+
 export interface InventoryHealth {
   total_products: number;
   active_products: number;
