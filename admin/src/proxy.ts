@@ -37,6 +37,17 @@ export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const api = apiOrigin();
 
+  /**
+   * Where the browser posts a violation. Same reasoning as the storefront's
+   * copy: every way this policy can be wrong produces one symptom — a screen
+   * that paints and never hydrates — and none of them reaches a log.
+   *
+   * Needs no `connect-src` entry: a violation report is sent by the browser's
+   * reporting agent rather than by page script, so the policy does not police
+   * it. That is what makes a same-origin collector workable here.
+   */
+  const reportTo = api ? `${api}/api/csp-report` : '';
+
   const directives = [
     "default-src 'self'",
 
@@ -73,6 +84,11 @@ export function proxy(request: NextRequest) {
     // is the modern directive, that one is for older browsers.
     "frame-ancestors 'none'",
     ...(isDev ? [] : ['upgrade-insecure-requests']),
+
+    // Both spellings. `report-uri` is deprecated and is what Safari and older
+    // Chrome send; `report-to` names the group defined by the
+    // `Reporting-Endpoints` header below. Listing one loses half the reports.
+    ...(reportTo ? [`report-uri ${reportTo}`, 'report-to csp-endpoint'] : []),
   ];
 
   const csp = directives.join('; ');
@@ -85,6 +101,11 @@ export function proxy(request: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('Content-Security-Policy', csp);
+  if (reportTo) {
+    // Defines the group `report-to` refers to. Without this header that
+    // directive names nothing and is ignored.
+    response.headers.set('Reporting-Endpoints', `csp-endpoint="${reportTo}"`);
+  }
   return response;
 }
 

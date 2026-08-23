@@ -77,10 +77,31 @@ export class ApiError extends Error {
     return this.status === 409;
   }
 
-  /** Field-level errors from a DRF serializer, if the failure carried any. */
+  /**
+   * Field-level errors from a DRF serializer, if the failure carried any.
+   *
+   * **Looks under `errors` first**, because that is where this API actually
+   * puts them. `api/exceptions.py::detail_exception_handler` rewrites every
+   * validation failure to `{"detail": "<one sentence>", "errors": {...}}` —
+   * so scanning only the top level for array values, which is what this used
+   * to do, found nothing on every real response and quietly returned null
+   * forever. No screen broke; they simply never got the per-field messages the
+   * getter exists to supply, and showed the flattened sentence instead.
+   *
+   * The top-level scan is kept as a fallback for a body that predates that
+   * handler or comes from somewhere else.
+   */
   get fieldErrors(): Record<string, string[]> | null {
     if (!this.payload || typeof this.payload !== 'object') return null;
-    const entries = Object.entries(this.payload as Record<string, unknown>).filter(
+
+    const body = this.payload as Record<string, unknown>;
+    const nested = body.errors;
+    const source =
+      nested && typeof nested === 'object' && !Array.isArray(nested)
+        ? (nested as Record<string, unknown>)
+        : body;
+
+    const entries = Object.entries(source).filter(
       ([key, value]) => key !== 'detail' && Array.isArray(value),
     );
     if (!entries.length) return null;
@@ -114,7 +135,42 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/**
+ * How long to wait before deciding the API is not going to answer.
+ *
+ * There was none, and `fetch` has none of its own: an API that accepted the
+ * connection and then stopped responding left a console screen spinning until
+ * the browser gave up, which can be minutes. Matches the storefront and the
+ * rider app rather than inventing a third number.
+ */
+const TIMEOUT_MS = 15_000;
+
+/** Attempts, not retries. 1 means try once and give up. */
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_MS = 300;
+
+/** Transient server-side failures. A 4xx is not one of these. */
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Only a GET may be sent twice.
+ *
+ * Everything the console writes is a real action — moving an order's status,
+ * resetting a PIN, editing stock — and several are guarded server-side by a 409
+ * that a blind retry would turn into a confusing error the manager did not
+ * cause. The dashboard and the order board poll on a timer anyway, so a failed
+ * write is retried by a human who can see what happened.
+ */
+const isReplayable = (method: string | undefined) =>
+  (method ?? 'GET').toUpperCase() === 'GET';
+
+/** One attempt: fetch, parse, apply the 401 interceptor, throw on failure. */
+async function attempt(
+  path: string,
+  options: RequestOptions,
+): Promise<{ response: Response; payload: unknown }> {
   const { body, headers: headerInit, ...rest } = options;
   const headers = new Headers(headerInit);
 
@@ -125,10 +181,18 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     headers.set('Content-Type', 'application/json');
   }
 
+  // Composed rather than replacing the caller's signal: a debounced search
+  // aborts its own in-flight request on every keystroke and must keep being
+  // able to, while the timeout applies whether the caller thought about it or
+  // not.
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const signal = rest.signal ? AbortSignal.any([rest.signal, timeout]) : timeout;
+
   let response: Response;
   try {
     response = await fetch(apiUrl(path), {
       ...rest,
+      signal,
       headers,
       body:
         body === undefined
@@ -141,11 +205,15 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     // Re-thrown rather than swallowed. A debounced search cancels its previous
     // request on every keystroke, and turning those aborts into "could not
     // reach the server" paints an error over a working screen.
+    //
+    // The *caller's* signal, not the composed one: a timeout also aborts, and a
+    // timeout is precisely the network failure this is meant to report.
+    if (rest.signal?.aborted) throw caught;
     if (caught instanceof DOMException && caught.name === 'AbortError') throw caught;
     throw new NetworkError();
   }
 
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204) return { response, payload: undefined };
 
   const text = await response.text();
   let payload: unknown = undefined;
@@ -172,12 +240,62 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new ApiError(response.status, detail, payload);
   }
 
+  return { response, payload };
+}
+
+/**
+ * `attempt`, with bounded retries for the requests it is safe to repeat.
+ *
+ * The one place both `request` and `authPage` go through. `authPage` used to
+ * carry its own forty-line copy of the fetch, the parse and the interceptor,
+ * which is why the indirection is worth it: two copies of the 401 handling is
+ * one copy that eventually stops matching the other.
+ */
+async function send(
+  path: string,
+  options: RequestOptions,
+): Promise<{ response: Response; payload: unknown }> {
+  const attempts = isReplayable(options.method) ? MAX_ATTEMPTS : 1;
+  let last: unknown;
+
+  for (let n = 1; n <= attempts; n += 1) {
+    try {
+      return await attempt(path, options);
+    } catch (caught) {
+      last = caught;
+      if (options.signal?.aborted) throw caught;
+
+      const worthRetrying =
+        caught instanceof NetworkError ||
+        (caught instanceof ApiError && RETRYABLE_STATUSES.has(caught.status));
+
+      if (!worthRetrying || n === attempts) throw caught;
+
+      // Exponential, so an overloaded API is not hammered by every polling
+      // console in the shop retrying in lockstep.
+      await sleep(RETRY_BASE_MS * 2 ** (n - 1));
+    }
+  }
+
+  throw last;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { payload } = await send(path, options);
   return payload as T;
 }
 
 /** An unauthenticated request. Only `/api/auth/login` needs this. */
 export function publicRequest<T>(path: string, options?: RequestOptions): Promise<T> {
   return request<T>(path, options);
+}
+
+/** The caller's options, with the stored bearer token attached. */
+function authorised(options: RequestOptions): RequestOptions {
+  const token = readToken();
+  const headers = new Headers(options.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return { ...options, headers };
 }
 
 /**
@@ -188,10 +306,7 @@ export function publicRequest<T>(path: string, options?: RequestOptions): Promis
  * of whenever this module happens to be re-evaluated.
  */
 export function authRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const token = readToken();
-  const headers = new Headers(options.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  return request<T>(path, { ...options, headers });
+  return request<T>(path, authorised(options));
 }
 
 /**
@@ -199,46 +314,16 @@ export function authRequest<T>(path: string, options: RequestOptions = {}): Prom
  *
  * The API's list responses are bare JSON arrays with no `{count, results}`
  * envelope — a deliberate choice that three clients depend on — so the total
- * arrives in `X-Total-Count`. That header has to be read off the raw response,
- * which is why this does not go through `request`.
+ * arrives in `X-Total-Count`, which has to be read off the raw response.
  */
 export async function authPage<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<{ rows: T[]; total: number }> {
-  const token = readToken();
-  const headers = new Headers(options.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-
-  let response: Response;
-  try {
-    response = await fetch(apiUrl(path), { ...options, headers, body: undefined });
-  } catch (caught) {
-    if (caught instanceof DOMException && caught.name === 'AbortError') throw caught;
-    throw new NetworkError();
-  }
-
-  const text = await response.text();
-  let payload: unknown = undefined;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
-  }
-
-  if (!response.ok) {
-    const detail =
-      (payload && typeof payload === 'object' && 'detail' in payload
-        ? String((payload as { detail: unknown }).detail)
-        : '') || `Request failed (${response.status}).`;
-    if (response.status === 401) {
-      clearSession();
-      onSessionExpired?.();
-    }
-    throw new ApiError(response.status, detail, payload);
-  }
+  const { response, payload } = await send(path, {
+    ...authorised(options),
+    body: undefined,
+  });
 
   const rows = Array.isArray(payload) ? (payload as T[]) : [];
   const header = response.headers.get('X-Total-Count');

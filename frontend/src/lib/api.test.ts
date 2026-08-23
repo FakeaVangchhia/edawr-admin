@@ -25,13 +25,21 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 
-const ok = (body: unknown) =>
+/**
+ * A fresh Response per call.
+ *
+ * `mockResolvedValue(new Response(...))` hands the *same* object to every
+ * attempt, and a Response body can only be read once — so a retry reads a
+ * consumed body and the test fails for a reason unrelated to the code. Every
+ * mock here therefore goes through `mockImplementation`.
+ */
+const ok = (body: unknown) => () =>
   new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 
-const failure = (status: number, detail = 'nope') =>
+const failure = (status: number, detail = 'nope') => () =>
   new Response(JSON.stringify({ detail }), {
     status,
     headers: { 'Content-Type': 'application/json' },
@@ -51,19 +59,19 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
 
 describe('request', () => {
   it('returns the parsed body', async () => {
-    fetchMock.mockResolvedValue(ok({ id: 7 }));
+    fetchMock.mockImplementation(ok({ id: 7 }));
 
     await expect(settle(request('/api/x'))).resolves.toEqual({ id: 7 });
   });
 
   it('returns undefined for 204', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    fetchMock.mockImplementation(() => new Response(null, { status: 204 }));
 
     await expect(settle(request('/api/x'))).resolves.toBeUndefined();
   });
 
   it('throws ApiError carrying the backend detail', async () => {
-    fetchMock.mockResolvedValue(failure(400, 'Minimum order value is 49.00.'));
+    fetchMock.mockImplementation(failure(400, 'Minimum order value is 49.00.'));
 
     await expect(settle(request('/api/x'))).rejects.toThrow(
       'Minimum order value is 49.00.',
@@ -71,11 +79,12 @@ describe('request', () => {
   });
 
   it('keeps the payload on a 409, which the cart reads', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({ detail: 'gone', unavailable: [{ product_id: 3 }] }),
-        { status: 409, headers: { 'Content-Type': 'application/json' } },
-      ),
+    fetchMock.mockImplementation(
+      () =>
+        new Response(
+          JSON.stringify({ detail: 'gone', unavailable: [{ product_id: 3 }] }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        ),
     );
 
     const error = await settle(request('/api/x')).catch((e: unknown) => e);
@@ -89,7 +98,7 @@ describe('request', () => {
   it('retries a GET that fails at the network', async () => {
     fetchMock
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(ok({ id: 1 }));
+      .mockImplementationOnce(ok({ id: 1 }));
 
     await expect(settle(request('/api/x'))).resolves.toEqual({ id: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -97,8 +106,8 @@ describe('request', () => {
 
   it('retries a GET on a 503', async () => {
     fetchMock
-      .mockResolvedValueOnce(failure(503))
-      .mockResolvedValueOnce(ok({ id: 1 }));
+      .mockImplementationOnce(failure(503))
+      .mockImplementationOnce(ok({ id: 1 }));
 
     await expect(settle(request('/api/x'))).resolves.toEqual({ id: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -115,7 +124,7 @@ describe('request', () => {
     // A missing order does not become present because you asked again, and the
     // orders page distinguishes 404 from unreachable — retrying would delay
     // that answer by a second for nothing.
-    fetchMock.mockResolvedValue(failure(404));
+    fetchMock.mockImplementation(failure(404));
 
     await expect(settle(request('/api/x'))).rejects.toBeInstanceOf(ApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -134,7 +143,7 @@ describe('request', () => {
   });
 
   it('never retries a POST that 503s either', async () => {
-    fetchMock.mockResolvedValue(failure(503));
+    fetchMock.mockImplementation(failure(503));
 
     await expect(
       settle(request('/api/store/orders', { method: 'POST', body: {} })),
@@ -160,7 +169,7 @@ describe('request', () => {
   });
 
   it('sends a timeout signal so a hung backend cannot spin forever', async () => {
-    fetchMock.mockResolvedValue(ok({}));
+    fetchMock.mockImplementation(ok({}));
 
     await settle(request('/api/x'));
 
@@ -169,7 +178,7 @@ describe('request', () => {
   });
 
   it('sets a JSON content type for a body, and none without one', async () => {
-    fetchMock.mockResolvedValue(ok({}));
+    fetchMock.mockImplementation(ok({}));
 
     await settle(request('/api/x', { method: 'POST', body: { a: 1 } }));
     const withBody = fetchMock.mock.calls[0][1] as RequestInit;
@@ -183,7 +192,7 @@ describe('request', () => {
   });
 
   it('passes a caller header through, which is how checkout sends its key', async () => {
-    fetchMock.mockResolvedValue(ok({}));
+    fetchMock.mockImplementation(ok({}));
 
     await settle(
       request('/api/store/orders', {
