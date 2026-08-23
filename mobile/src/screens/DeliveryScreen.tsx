@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -327,6 +328,14 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
    * The confirmation states the amount, which makes it a cash-collected step
    * rather than merely an "are you sure" — the rider has to read the figure
    * they are confirming they hold.
+   *
+   * **"Paid less" is the third button and it matters more than it looks.**
+   * Without it a customer who is short by twenty rupees leaves the rider two
+   * options, both wrong: record a full collection and cover the gap out of
+   * their own pocket, or mark the delivery failed — which says the goods came
+   * back when they did not. Either way the till reconciles against a number
+   * nobody can explain later, and the rider is the one who looks careless.
+   * The shortfall has to be recordable at the door or it is not recorded at all.
    */
   const confirmDelivered = useCallback(
     (order: Order) => {
@@ -337,6 +346,15 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
 This cannot be undone.`,
         [
           { text: 'Not yet', style: 'cancel' },
+          {
+            text: 'Paid less',
+            onPress: () => {
+              // Pre-filled with what is owed, so the common revision is
+              // editing two digits rather than typing the whole figure.
+              setShortAmount(String(order.grand_total));
+              setShortPaying(order);
+            },
+          },
           {
             text: `Collected ${formatMoney(order.grand_total)}`,
             style: 'default',
@@ -387,10 +405,47 @@ This cannot be undone.`,
    * in the rain, and `Alert.prompt` is iOS-only anyway.
    */
   const [failing, setFailing] = useState<Order | null>(null);
+  // The order whose cash is being revised down, and what the rider typed. Held
+  // as a string rather than a number because that is what a TextInput gives
+  // you, and coercing on every keystroke makes "1." unrepresentable — the
+  // rider could not type a decimal point.
+  const [shortPaying, setShortPaying] = useState<Order | null>(null);
+  const [shortAmount, setShortAmount] = useState('');
 
   const confirmFailed = useCallback((order: Order) => {
     setFailing(order);
   }, []);
+
+  /**
+   * Record a delivery where the customer paid less than the total.
+   *
+   * Validated here as well as on the server, because the server's 400 arrives
+   * as a generic "Action failed" alert while the rider is standing at a door
+   * with the modal already closed. Above the total is refused rather than
+   * clamped: it is change the rider owes back, not revenue, and silently
+   * booking it would make the till reconcile against money the store never
+   * kept.
+   */
+  const sendShortPayment = () => {
+    const order = shortPaying;
+    if (!order) return;
+
+    const amount = Number(shortAmount.trim());
+    if (!Number.isFinite(amount) || amount < 0) {
+      Alert.alert('Enter an amount', 'Type the cash you actually took, in rupees.');
+      return;
+    }
+    if (amount > order.grand_total) {
+      Alert.alert(
+        'That is more than the total',
+        `This order is ${formatMoney(order.grand_total)}. Anything above that is change you owe the customer, not money for the till.`,
+      );
+      return;
+    }
+
+    setShortPaying(null);
+    submitDecision(order.id, 'status', 'Delivered', undefined, amount);
+  };
 
   const sendFailure = (reason: string) => {
     const order = failing;
@@ -408,6 +463,7 @@ This cannot be undone.`,
     // cost a rider who could not complete a drop.
     status?: RiderStatus,
     reason?: string,
+    amountCollected?: number,
   ) => {
     try {
       setSubmittingId(orderId);
@@ -418,7 +474,7 @@ This cannot be undone.`,
       } else if (action === 'reject') {
         await rejectOrder(orderId, token);
       } else {
-        await setOrderStatus(orderId, status ?? 'Delivered', token, reason);
+        await setOrderStatus(orderId, status ?? 'Delivered', token, reason, amountCollected);
       }
 
       await refreshDashboard();
@@ -791,6 +847,53 @@ This cannot be undone.`,
         />
       )}
 
+      {/* Recording a short payment. A modal because it needs a text field,
+          which Alert.alert cannot portably provide — Android has no prompt. */}
+      <Modal
+        visible={shortPaying !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShortPaying(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              How much did you collect for #{shortPaying?.id}?
+            </Text>
+            <Text style={styles.modalBody}>
+              This order is {shortPaying ? formatMoney(shortPaying.grand_total) : ''}. Record
+              what you actually took — the difference is reported to the store, so
+              you are not the one covering it.
+            </Text>
+
+            <TextInput
+              style={styles.amountInput}
+              value={shortAmount}
+              onChangeText={setShortAmount}
+              // `decimal-pad`, not `numeric`: paise are possible and the plain
+              // numeric pad on iOS has no decimal separator.
+              keyboardType="decimal-pad"
+              accessibilityLabel="Cash collected, in rupees"
+              placeholder="0"
+              placeholderTextColor="#94a3b8"
+              autoFocus
+              selectTextOnFocus
+            />
+
+            <TouchableOpacity style={styles.modalConfirm} onPress={sendShortPayment}>
+              <Text style={styles.modalConfirmText}>Record and mark delivered</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalCancel}
+              onPress={() => setShortPaying(null)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* The failed-delivery reason picker. A modal rather than Alert.alert
           because Android caps an alert at three buttons and silently discards
           the rest — see confirmFailed. */}
@@ -1160,6 +1263,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#b91c1c',
+  },
+  amountInput: {
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    // Large and tabular-ish: this is a figure a rider reads back to a manager
+    // over the phone, in a doorway, often one-handed.
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 12,
+  },
+  modalConfirm: {
+    borderRadius: 14,
+    backgroundColor: '#4169E1',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  modalConfirmText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#ffffff',
   },
   modalCancel: {
     marginTop: 4,
