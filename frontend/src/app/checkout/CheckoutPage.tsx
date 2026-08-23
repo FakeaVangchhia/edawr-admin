@@ -487,7 +487,7 @@ export function CheckoutPage() {
                       ) : (
                         <ImageFallback
                           name={line.product.name}
-                          className="size-11 shrink-0 rounded-xl text-base"
+                          className="size-11 shrink-0 rounded-xl"
                         />
                       )}
                       <span className="min-w-0 flex-1">

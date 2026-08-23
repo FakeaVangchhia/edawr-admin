@@ -145,7 +145,7 @@ export function ProductPage({ id }: { id: number }) {
                 className="aspect-square w-full object-cover"
               />
             ) : (
-              <ImageFallback name={product.name} className="aspect-square w-full text-7xl" />
+              <ImageFallback name={product.name} className="aspect-square w-full" />
             )}
             {product.discount_percent > 0 && (
               <span className="num absolute left-4 top-4 rounded-full bg-amber px-3 py-1 text-sm font-semibold text-amber-foreground">

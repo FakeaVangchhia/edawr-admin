@@ -169,17 +169,41 @@ export function EtaChip({ minutes, subtle }: { minutes: number | null; subtle?: 
   );
 }
 
-/** A placeholder for a product with no image, in the palette rather than grey. */
-export function ImageFallback({ name, className }: { name: string; className?: string }) {
+/**
+ * The stand-in for a product or category with no photo uploaded yet.
+ *
+ * Nothing in a fresh database has an image — `manage.py seed` sets no
+ * `image_url` on any of the 33 products or 8 categories — so this is not a rare
+ * edge case, it is what the entire storefront looks like until someone starts
+ * uploading. A single letter in a box was legible but read as a missing asset;
+ * the placeholder illustration reads as a product tile with no photo yet, which
+ * is what it is.
+ *
+ * `name` is still taken and still unused for display. It stays in the signature
+ * because it is the natural thing to key a per-item image off later, and
+ * because every call site already passes it.
+ *
+ * The whole element is `aria-hidden` with an empty `alt`: at all nine call
+ * sites the name is rendered as text immediately beside this, and announcing a
+ * decorative placeholder would say the product's name twice.
+ */
+export function ImageFallback({ className }: { name: string; className?: string }) {
   return (
     <span
-      className={cn(
-        'grid place-items-center bg-amber-soft text-2xl font-semibold text-amber-foreground/60',
-        className,
-      )}
+      className={cn('grid place-items-center bg-amber-soft', className)}
       aria-hidden
     >
-      {name.trim().charAt(0).toUpperCase() || '?'}
+      {/* Sized as a fraction of the box rather than fixed: this renders at
+          everything from a 44px cart thumbnail to a full-width category
+          banner, and `object-contain` keeps the illustration from stretching
+          in the 16/10 and square boxes alike. The file is same-origin from
+          `public/`, which `img-src 'self'` already covers. */}
+      <img
+        src="/product-placeholder.svg"
+        alt=""
+        loading="lazy"
+        className="size-[58%] max-h-full max-w-full object-contain opacity-90"
+      />
     </span>
   );
 }

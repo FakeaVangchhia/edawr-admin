@@ -393,7 +393,7 @@ export function OrderTracker({ token }: { token: string }) {
                           className="size-11 shrink-0 rounded-xl bg-surface object-cover"
                         />
                       ) : (
-                        <ImageFallback name={item.name} className="size-11 shrink-0 rounded-xl text-base" />
+                        <ImageFallback name={item.name} className="size-11 shrink-0 rounded-xl" />
                       )}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{item.name}</span>

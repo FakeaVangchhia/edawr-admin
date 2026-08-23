@@ -130,7 +130,7 @@ export function CartPage() {
                       className="size-16 rounded-2xl bg-surface object-cover"
                     />
                   ) : (
-                    <ImageFallback name={line.product.name} className="size-16 rounded-2xl text-xl" />
+                    <ImageFallback name={line.product.name} className="size-16 rounded-2xl" />
                   )}
                 </Link>
 

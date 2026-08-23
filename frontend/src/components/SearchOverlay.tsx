@@ -217,7 +217,7 @@ export function SearchOverlay({
                       className="size-11 shrink-0 rounded-xl bg-surface object-cover"
                     />
                   ) : (
-                    <ImageFallback name={product.name} className="size-11 shrink-0 rounded-xl text-base" />
+                    <ImageFallback name={product.name} className="size-11 shrink-0 rounded-xl" />
                   )}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{product.name}</span>

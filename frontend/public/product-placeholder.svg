@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="No product photo yet">
+  <!--
+    The stand-in for a product or category with no photo uploaded yet.
+
+    It is a file rather than an inline component so that replacing it with a
+    real illustration — or a photograph — is a matter of overwriting one asset,
+    with no code change and nothing that imports it needing to be touched.
+
+    Colours are literal rather than `currentColor`: this is loaded through an
+    <img>, which renders in its own document and inherits nothing from the page.
+
+    There is deliberately no `prefers-color-scheme` block. The storefront ships
+    a single light palette — `globals.css` has no dark theme and no theme
+    toggle — so a dark variant here would only ever fire on the OS preference,
+    repainting this one element darker while the page around it stayed light.
+    If a dark theme is added, this file needs a matching block; until then the
+    honest thing is to match the only palette there is.
+
+    Every shape is drawn on transparency, so the wrapper's `bg-amber-soft`
+    shows through as the ground.
+  -->
+  <style>
+    .bag   { fill: #e0a441; }
+    .fold  { fill: #edc07d; }
+    .leaf  { fill: #7f9e5f; }
+    .stem  { fill: none; stroke: #5f7a45; stroke-width: 1.6; stroke-linecap: round; }
+    .fruit { fill: #d1694a; }
+  </style>
+
+  <!--
+    Everything in this group pokes out of the top of the bag, so it is drawn
+    first and the fold below overlaps it. Nothing here needs a bottom edge —
+    the fold is what cuts it off.
+  -->
+  <g>
+    <!-- Greens, left of centre. -->
+    <path class="leaf" d="M27 24c-6-4-7-11-1-14 4 3 4 10 1 14z" />
+    <path class="leaf" d="M28 21c4-3 9-4 10 0-2 3-7 3-10 0z" />
+    <path class="stem" d="M27.5 24v-7" />
+
+    <!-- Something round, right of centre, mostly hidden behind the fold. -->
+    <circle class="fruit" cx="41" cy="19" r="6" />
+  </g>
+
+  <!-- Bag: a folded-over top, then a body tapering slightly to the base. -->
+  <path class="bag" d="M14 30h36l-2.4 21.6A4 4 0 0 1 43.6 55H20.4a4 4 0 0 1-4-3.4L14 30z" />
+  <rect class="fold" x="12" y="22" width="40" height="9" rx="2.5" />
+</svg>

@@ -360,8 +360,8 @@ export function HomePage() {
  * reason: with the link already named, alt text would make it announce twice.
  *
  * Until a category has an image uploaded on the console, `ImageFallback` shows
- * its initial on a tinted ground. That is a placeholder rather than a design —
- * this card is worth what the photograph in it is worth.
+ * a placeholder illustration on a tinted ground. That is a placeholder rather
+ * than a design — this card is worth what the photograph in it is worth.
  */
 function FeaturedCard({ category, priority }: { category: StoreCategory; priority: boolean }) {
   const image = assetUrl(category.image_url);
@@ -384,7 +384,7 @@ function FeaturedCard({ category, priority }: { category: StoreCategory; priorit
           className="aspect-[16/10] w-full object-cover transition-transform duration-500 ease-[var(--ease-apple)] group-hover:scale-[1.03]"
         />
       ) : (
-        <ImageFallback name={category.name} className="aspect-[16/10] w-full text-5xl" />
+        <ImageFallback name={category.name} className="aspect-[16/10] w-full" />
       )}
     </Link>
   );
