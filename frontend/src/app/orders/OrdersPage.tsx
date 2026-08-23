@@ -12,6 +12,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useRecentOrders } from '@/hooks/useStoreData';
 import { cn } from '@/lib/utils';
 import type { TrackedOrder } from '@/types';
+import { ApiError } from '@/lib/api';
+import { mapWithLimit } from '@/lib/concurrency';
 import { trackOrder } from '@/lib/store-api';
 
 /**
@@ -23,8 +25,20 @@ import { trackOrder } from '@/lib/store-api';
  * hours later is worse than no status at all.
  *
  * Orders whose tokens 404 are dropped by `OrderTracker` when they are opened;
- * here they simply render as unavailable rather than vanishing mid-list.
+ * here they render as gone rather than vanishing mid-list.
+ *
+ * **"Gone" and "we cannot reach the store" are shown differently**, and they
+ * used to be the same word. Both took the same `.catch(() => null)` branch and
+ * both rendered "Unavailable", so a backend outage looked exactly like ten
+ * deleted orders — the single most alarming thing this page could tell a
+ * customer, and in that case it was not even true.
  */
+
+/** What we know about one remembered token after trying to fetch it. */
+type OrderState = TrackedOrder | 'gone' | 'unreachable';
+
+/** How many tracking requests to have in flight at once. See lib/concurrency.ts. */
+const FETCH_CONCURRENCY = 3;
 
 export function OrdersPage() {
   const remembered = useRecentOrders();
@@ -41,7 +55,7 @@ export function OrdersPage() {
   const tokens = remembered.map((entry) => entry.token).join(',');
   const [fetched, setFetched] = useState<{
     tokens: string;
-    orders: Record<string, TrackedOrder | null>;
+    orders: Record<string, OrderState>;
   } | null>(null);
 
   useEffect(() => {
@@ -49,15 +63,20 @@ export function OrdersPage() {
 
     // An empty list still resolves — the "no orders" state is a result, not a
     // pending one, and returning early here would leave it loading forever.
-    Promise.all(
-      (tokens ? tokens.split(',') : []).map((token) =>
+    mapWithLimit(
+      tokens ? tokens.split(',') : [],
+      FETCH_CONCURRENCY,
+      (token) =>
         trackOrder(token, controller.signal)
           .then((order) => [token, order] as const)
-          // A token that no longer resolves is shown as unavailable rather than
-          // failing the whole list; one reseeded database should not hide the
-          // orders that are still fine.
-          .catch(() => [token, null] as const),
-      ),
+          .catch((error: unknown) => {
+            // A failed token never fails the whole list — one reseeded database
+            // should not hide the orders that are still fine — but *why* it
+            // failed decides what the customer is told. A 404 means the order
+            // is genuinely gone; anything else means we could not ask.
+            const gone = error instanceof ApiError && error.status === 404;
+            return [token, gone ? 'gone' : 'unreachable'] as const;
+          }),
     ).then((entries) => {
       if (controller.signal.aborted) return;
       setFetched({ tokens, orders: Object.fromEntries(entries) });
@@ -138,7 +157,11 @@ export function OrdersPage() {
 
       <ul className="mt-10 space-y-4">
         {remembered.map((entry) => {
-          const order = orders[entry.token];
+          const state = orders[entry.token];
+          // Narrowed once, here, so every branch below reads an order or reads
+          // nothing — rather than each one re-checking which of the three
+          // states it is looking at.
+          const order = typeof state === 'object' ? state : null;
           const live = order ? isLive(order.status) : false;
 
           return (
@@ -175,9 +198,16 @@ export function OrdersPage() {
                     >
                       {order.status_label}
                     </span>
-                  ) : (
+                  ) : state === 'gone' ? (
                     <span className="rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                      Unavailable
+                      No longer available
+                    </span>
+                  ) : (
+                    // The store is unreachable, not the order missing. Saying
+                    // "unavailable" here told a customer their order had been
+                    // deleted when in fact the API was down for thirty seconds.
+                    <span className="rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                      Status unavailable
                     </span>
                   )}
                 </div>

@@ -186,3 +186,55 @@ export function usePromiseMinutes(deliveryType?: DeliveryType): number | null {
   if (!deliveryType) return config.promise_minutes;
   return tierFor(config, deliveryType).promise_minutes;
 }
+
+/**
+ * Whether the browser thinks it has a connection.
+ *
+ * The storefront had no offline handling at all: on a dead connection every
+ * navigation produced the browser's own error page and every fetch produced
+ * "Could not reach the store", with nothing to say the problem was this side.
+ * Aizawl mobile data drops, and a customer who has just lost signal deserves to
+ * be told that rather than to conclude the shop is broken.
+ *
+ * `navigator.onLine` is famously weak — it reports whether there is *a* network
+ * interface, not whether anything is reachable — so this is used for a banner
+ * and never to decide whether to attempt a request. False is a reliable "no
+ * connection"; true means only "worth trying", which is what the request layer
+ * assumes anyway.
+ *
+ * An external store rather than an effect, matching everything else here: the
+ * server snapshot is always `true`, so the server-rendered HTML and the first
+ * client render agree and no state is set synchronously inside an effect.
+ */
+const onlineListeners = new Set<() => void>();
+let onlineSnapshot = true;
+
+function emitOnline() {
+  onlineSnapshot = navigator.onLine;
+  for (const listener of onlineListeners) listener();
+}
+
+export function useIsOnline(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      onlineListeners.add(listener);
+      if (onlineListeners.size === 1) {
+        window.addEventListener('online', emitOnline);
+        window.addEventListener('offline', emitOnline);
+        // The page may have loaded from cache while already offline, so the
+        // first subscriber reads the current value rather than waiting for a
+        // transition that has already happened.
+        onlineSnapshot = navigator.onLine;
+      }
+      return () => {
+        onlineListeners.delete(listener);
+        if (onlineListeners.size === 0) {
+          window.removeEventListener('online', emitOnline);
+          window.removeEventListener('offline', emitOnline);
+        }
+      };
+    },
+    () => onlineSnapshot,
+    () => true,
+  );
+}

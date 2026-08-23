@@ -69,6 +69,37 @@ export class NetworkError extends Error {
 type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown };
 
 /**
+ * How long to wait before deciding the store is not going to answer.
+ *
+ * There was no timeout at all, and `fetch` has none of its own — a request to a
+ * backend that accepts the connection and then stops responding hangs until the
+ * browser gives up, which can be minutes. On the storefront that renders as a
+ * spinner nobody can get out of. The rider app has had a 15s ceiling since it
+ * was written; this matches it rather than inventing a second number.
+ */
+const TIMEOUT_MS = 15_000;
+
+/** Attempts, not retries: 1 means "try once and give up". */
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_MS = 300;
+
+/** Server-side failures that are worth trying again in a moment. */
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * True for a request that can safely be sent twice.
+ *
+ * Only GET. A retried POST is the bug the backend's `Idempotency-Key` exists to
+ * prevent — checkout writes an order and moves stock — and the two mechanisms
+ * must not be confused for each other: the key makes a retry the *customer*
+ * chooses safe, and this keeps the client from retrying on its own behalf.
+ */
+const isReplayable = (method: string | undefined) =>
+  (method ?? 'GET').toUpperCase() === 'GET';
+
+/**
  * One fetch wrapper for the whole app.
  *
  * Every error the backend can produce is `{"detail": "..."}` (enforced by
@@ -84,10 +115,52 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     requestHeaders.set('Content-Type', 'application/json');
   }
 
+  const attempts = isReplayable(rest.method) ? MAX_ATTEMPTS : 1;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await attemptRequest<T>(path, requestHeaders, body, rest);
+    } catch (error) {
+      lastError = error;
+
+      // The caller cancelled — a changed search query, a navigation. Never a
+      // reason to try again, and never a reason to wait.
+      if (rest.signal?.aborted) throw error;
+
+      const worthRetrying =
+        error instanceof NetworkError ||
+        (error instanceof ApiError && RETRYABLE_STATUSES.has(error.status));
+
+      if (!worthRetrying || attempt === attempts) throw error;
+
+      // Exponential, so a store that is briefly overloaded is not hammered by
+      // every open tab retrying in lockstep.
+      await sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
+    }
+  }
+
+  throw lastError;
+}
+
+async function attemptRequest<T>(
+  path: string,
+  requestHeaders: Headers,
+  body: unknown,
+  rest: Omit<RequestOptions, 'body' | 'headers'>,
+): Promise<T> {
+  // Composed rather than replacing the caller's signal: the search overlay
+  // aborts its own in-flight request on every keystroke and must keep being
+  // able to, while the timeout applies to every request whether the caller
+  // thought about it or not.
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const signal = rest.signal ? AbortSignal.any([rest.signal, timeout]) : timeout;
+
   let response: Response;
   try {
     response = await fetch(apiUrl(path), {
       ...rest,
+      signal,
       headers: requestHeaders,
       body:
         body === undefined
@@ -102,6 +175,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     // means any caller that renders `error.message` without first re-checking
     // `signal.aborted` flashes "Could not reach the store" on every keystroke
     // of the debounced search. Re-throw so the abort stays recognisable.
+    //
+    // Note this checks the *caller's* signal, not the composed one: a timeout
+    // also aborts, and a timeout is exactly the network failure this reports.
     if (rest.signal?.aborted) throw error;
     // fetch() rejects only on a network-level failure; an HTTP 500 resolves.
     throw new NetworkError();

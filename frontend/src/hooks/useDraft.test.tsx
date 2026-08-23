@@ -1,4 +1,4 @@
-import { act, type ReactElement } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,46 +15,84 @@ import { useDraft } from '@/hooks/useDraft';
  * so the field could not be emptied.
  *
  * Mounted with `react-dom/client` and React's own `act` rather than Testing
- * Library, which the storefront does not install (see `ImageFallback.test.tsx`
- * for the same constraint). A hook holding state cannot be exercised with
- * `renderToStaticMarkup`, so this is the smallest harness that will do: render
- * a probe component, capture what the hook returned, drive it, re-render.
+ * Library, which the storefront does not install — see `ImageFallback.test.tsx`
+ * for the same constraint. The hook is driven through the DOM rather than by
+ * capturing what it returned: the React compiler's lint rules forbid a
+ * component writing to anything outside itself during render, which rules out
+ * the usual `renderHook` trick, and typing into the input is closer to what
+ * checkout actually does anyway.
  */
 
 // React refuses to batch `act` updates unless it is told it is in a test.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-type Draft = ReturnType<typeof useDraft>;
-
-let latest: Draft;
-let root: Root | null = null;
-
 function Probe({ source }: { source: string }) {
-  latest = useDraft(source);
-  return <input readOnly value={latest[0]} />;
+  const [value, setValue, reset] = useDraft(source);
+  return (
+    <form>
+      <input data-testid="field" value={value} onChange={(e) => setValue(e.target.value)} />
+      <button type="button" data-testid="reset" onClick={reset}>
+        reset
+      </button>
+    </form>
+  );
 }
 
-/** Mount (or re-render) the probe with a new source value. */
+let root: Root | null = null;
+let container: HTMLElement | null = null;
+
+/** Mount, or re-render with a new source value. */
 function render(source: string) {
-  const ui: ReactElement = <Probe source={source} />;
   if (root === null) {
-    const container = document.createElement('div');
+    container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
   }
   act(() => {
-    root!.render(ui);
+    root!.render(<Probe source={source} />);
   });
 }
 
+const find = <T extends HTMLElement>(id: string): T => {
+  const node = container?.querySelector<T>(`[data-testid="${id}"]`);
+  if (!node) throw new Error(`No ${id} rendered`);
+  return node;
+};
+
 /** What the customer would be looking at. */
-const shown = () => latest[0];
-const type = (next: string) => act(() => latest[1](next));
-const reset = () => act(() => latest[2]());
+const shown = () => find<HTMLInputElement>('field').value;
+
+/**
+ * Type into the field the way a person does.
+ *
+ * The native value setter plus a bubbling `input` event is what makes React
+ * notice a programmatic change to a controlled input: assigning `.value`
+ * directly updates the DOM node while React's own value tracker still holds the
+ * old string, so the synthetic onChange never fires.
+ */
+const type = (next: string) => {
+  const field = find<HTMLInputElement>('field');
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value',
+  )?.set;
+  act(() => {
+    setter?.call(field, next);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+const reset = () => {
+  const button = find<HTMLButtonElement>('reset');
+  act(() => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+};
 
 afterEach(() => {
   const current = root;
   root = null;
+  container = null;
   if (current) act(() => current.unmount());
   document.body.innerHTML = '';
 });

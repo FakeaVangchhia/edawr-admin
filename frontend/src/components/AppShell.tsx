@@ -24,7 +24,7 @@ import {
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { selectAddress, selectedAddress } from '@/lib/addresses';
 import { cn } from '@/lib/utils';
-import { useAddressBook, useCart, useStoreConfig } from '@/hooks/useStoreData';
+import { useAddressBook, useCart, useIsOnline, useStoreConfig } from '@/hooks/useStoreData';
 
 /**
  * The chrome around every page: header, location picker, search, footer and the
@@ -158,6 +158,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const pathname = usePathname();
   const config = useStoreConfig();
+  const online = useIsOnline();
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -172,6 +173,23 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
+      {/*
+        Above the header and outside the sticky element, so it pushes the page
+        down rather than covering the nav. `role="status"` with a polite live
+        region announces it once to a screen reader without stealing focus —
+        losing signal is worth knowing about, not worth interrupting for.
+      */}
+      {!online && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-destructive-soft px-4 py-2 text-center text-sm font-medium text-destructive"
+        >
+          You are offline. Browsing still works, but orders cannot be placed until
+          your connection is back.
+        </div>
+      )}
+
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-xl">
         <div className="container-page flex h-16 items-center gap-3 lg:h-20 lg:gap-6">
           <Logo />
