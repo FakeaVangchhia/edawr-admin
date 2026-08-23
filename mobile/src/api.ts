@@ -1,4 +1,4 @@
-import { API_URL } from './config';
+import { apiUrl } from './config';
 import { DeliveryDashboard, Order, OrderStatus, RiderSession, User } from './types';
 
 /** Every backend error is `{"detail": "..."}` — see backend/api/exceptions.py. */
@@ -89,7 +89,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    // `apiUrl()` rather than a module constant: resolution can fail on a
+    // misconfigured release build, and it now reports that by throwing here
+    // instead of during import, where nothing could catch it. In practice
+    // App.tsx renders the explanation before any request is attempted.
+    response = await fetch(`${apiUrl()}${path}`, {
       method,
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -148,6 +152,28 @@ export function fetchRiderSession(token: string): Promise<RiderSession> {
   return request('/api/auth/rider/me', { token });
 }
 
+/**
+ * Retire this rider's tokens server-side.
+ *
+ * Deleting the SecureStore entry removes *our* copy of a credential that keeps
+ * working for another twelve hours in anyone else's — and a rider's phone is
+ * the device most likely to be handed over, lost or shared at the end of a
+ * shift. This is what actually ends the session: the backend increments the
+ * rider's `token_version`, which every request compares against.
+ *
+ * Swallows its own failure, deliberately. A rider signing out in a basement
+ * must still be signed out of the phone in front of them, and `App.tsx` clears
+ * the local token whether this succeeded or not.
+ */
+export async function riderLogout(token: string): Promise<void> {
+  try {
+    await request('/api/auth/rider/logout', { method: 'POST', token });
+  } catch {
+    // Offline, or the token had already expired. Nothing to say, nothing to
+    // retry — the local clear is what the rider is waiting on.
+  }
+}
+
 // --------------------------------------------------------------------------
 // Delivery
 // --------------------------------------------------------------------------
@@ -200,15 +226,33 @@ export function rejectOrder(orderId: number, token: string): Promise<{ success: 
  *
  * `reason` is required by the server for `Failed`, and ignored for the others.
  */
+/**
+ * `amountCollected` is the cash actually taken, and only `Delivered` accepts it.
+ *
+ * Omitting it records the full `grand_total`, which the server stamps in
+ * `advance_status` — so the common case needs nothing here and there is no way
+ * to reach Delivered without a collection on record. It is sent only when the
+ * rider says the customer paid short, because that is the number the store
+ * cannot reconstruct and the one the till will be missing.
+ */
 export function setOrderStatus(
   orderId: number,
   status: OrderStatus,
   token: string,
   reason?: string,
+  amountCollected?: number,
 ): Promise<Order> {
   return request(`/api/orders/${orderId}/status`, {
     method: 'PATCH',
-    body: reason ? { status, reason } : { status },
+    body: {
+      status,
+      ...(reason ? { reason } : {}),
+      // `!== undefined`, not a truthiness check: zero is a real answer here —
+      // "they took the bag and paid nothing" — and `0 &&` would drop it and
+      // record a full collection instead, which is the single worst way this
+      // could be wrong.
+      ...(amountCollected !== undefined ? { amount_collected: amountCollected } : {}),
+    },
     token,
   });
 }

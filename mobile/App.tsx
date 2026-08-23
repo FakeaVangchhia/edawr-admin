@@ -1,13 +1,41 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { UnauthorizedError, fetchRiderSession } from './src/api';
+import { UnauthorizedError, fetchRiderSession, riderLogout } from './src/api';
+import { configError } from './src/config';
+import { ConfigErrorScreen, ErrorBoundary } from './src/ErrorBoundary';
+import { reportRiderCrash } from './src/report-error';
 import DeliveryScreen from './src/screens/DeliveryScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import { clearToken, loadToken, saveToken } from './src/session';
 import { RiderSession } from './src/types';
 
+/**
+ * The root, and the two things that wrap everything else.
+ *
+ * **`ConfigErrorScreen` before anything.** A release build with no
+ * `expo.extra.apiUrl` and no `EXPO_PUBLIC_API_URL` cannot work, and used to say
+ * so by throwing during the import of `config.ts` — before React existed, so
+ * the carefully worded message went nowhere and the rider got a white screen.
+ * It is now caught there and shown here.
+ *
+ * **`ErrorBoundary` around the app.** React Native's default for an uncaught
+ * render throw is to unmount everything, which in a release build is a crash to
+ * the home screen with no explanation, mid-shift.
+ */
 export default function App() {
+  if (configError !== null) {
+    return <ConfigErrorScreen message={configError} />;
+  }
+
+  return (
+    <ErrorBoundary onError={reportRiderCrash}>
+      <RiderApp />
+    </ErrorBoundary>
+  );
+}
+
+function RiderApp() {
   const [session, setSession] = useState<RiderSession | null>(null);
   // Distinct from "signed out": on launch we do not yet know which it is, and
   // flashing the login screen at a rider who is already signed in is jarring.
@@ -69,9 +97,14 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    // Retire the token server-side, then clear it locally regardless. Ordered
+    // this way because the call needs the token, and safe because `riderLogout`
+    // swallows its own failures: a rider signing out in a basement must still
+    // be signed out of the phone in front of them.
+    if (session) await riderLogout(session.access_token);
     setSession(null);
     await clearToken();
-  }, []);
+  }, [session]);
 
   if (restoring) {
     return (

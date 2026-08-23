@@ -125,4 +125,42 @@ function resolveApiUrl(): string {
   return `http://localhost:${DEFAULT_PORT}`;
 }
 
-export const API_URL = stripTrailingSlash(resolveApiUrl());
+/**
+ * Why the resolution above is caught rather than allowed to throw.
+ *
+ * Failing loudly on a misconfigured release build is right, and the two
+ * conditions that raise — no URL at all, and an `http://` URL — are both
+ * deliberate. What was wrong was *where* it happened: at module scope, during
+ * the import of `config.ts`, which `api.ts` imports and `App.tsx` imports in
+ * turn. So the throw landed before React had rendered anything and before any
+ * error boundary existed to catch it, and the carefully written message went to
+ * a log nobody reads while the rider got a white screen and a crash to home.
+ *
+ * The message is the entire value of failing loudly, so it has to reach a
+ * screen. `App.tsx` checks `configError` and renders it; `apiUrl()` throws for
+ * anything that somehow calls it anyway.
+ *
+ * `API_URL` stays exported and is `''` when unresolved — `LoginScreen` puts it
+ * in an error message, which is a string either way, and the app never gets
+ * that far in the broken case.
+ */
+let resolvedApiUrl = '';
+let resolutionError: string | null = null;
+
+try {
+  resolvedApiUrl = stripTrailingSlash(resolveApiUrl());
+} catch (caught) {
+  resolutionError =
+    caught instanceof Error ? caught.message : 'eDawr: the API URL is misconfigured.';
+}
+
+/** Non-null when this build cannot talk to a backend at all. */
+export const configError = resolutionError;
+
+export const API_URL = resolvedApiUrl;
+
+/** The backend's base URL, or a throw naming exactly what is misconfigured. */
+export function apiUrl(): string {
+  if (resolutionError !== null) throw new Error(resolutionError);
+  return resolvedApiUrl;
+}
