@@ -466,9 +466,17 @@ This cannot be undone.`,
           <Text style={styles.offerEyebrow}>Incoming Request</Text>
           <Text style={styles.orderTitle}>Order #{item.id}</Text>
         </View>
+        {/* An order whose customer declined geolocation has no distance, and
+            `dispatch._rank` returns null for it by design. Printing "0.0 km"
+            for that is the exact falsehood the nullable coordinates were
+            introduced to stop: it told every rider the drop was at the store. */}
         <View style={styles.pillPrimary}>
           <Ionicons name="navigate" size={13} color="#4169E1" />
-          <Text style={styles.pillPrimaryText}>{item.offered_distance_km?.toFixed(1) ?? '0.0'} km</Text>
+          <Text style={styles.pillPrimaryText}>
+            {item.offered_distance_km === null
+              ? 'Distance unknown'
+              : `${item.offered_distance_km.toFixed(1)} km`}
+          </Text>
         </View>
       </View>
 

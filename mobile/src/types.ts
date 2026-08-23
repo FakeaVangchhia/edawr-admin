@@ -82,8 +82,18 @@ export interface Order {
   customer_address: string;
   customer_landmark: string | null;
   delivery_notes: string | null;
-  customer_latitude: number;
-  customer_longitude: number;
+  /**
+   * Null when the customer declined geolocation at checkout, which is a
+   * supported outcome rather than an error — `Order.customer_latitude` is
+   * `null=True` with no default precisely so that an order with no position is
+   * not recorded as standing at the store counter.
+   *
+   * Typed as non-null, this invited arithmetic on a null: `toFixed` on a
+   * missing coordinate, or a distance computed from one, with the compiler
+   * agreeing it was safe.
+   */
+  customer_latitude: number | null;
+  customer_longitude: number | null;
   status: OrderStatus;
   status_label: string;
   cancellation_reason: string | null;
