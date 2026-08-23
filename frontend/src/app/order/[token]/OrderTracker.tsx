@@ -15,6 +15,7 @@ import {
   Loader2,
   MapPin,
   PackageCheck,
+  PackageX,
   PhoneCall,
   Receipt,
   Store,
@@ -31,6 +32,7 @@ import {
   formatMoneyExact,
   formatPhone,
 } from '@/lib/format';
+import { isLive, isStopped } from '@/lib/order-status';
 import { forgetOrder } from '@/lib/recent-orders';
 import { cancelOrder, trackOrder } from '@/lib/store-api';
 import { ImageFallback } from '@/components/ProductCard';
@@ -54,7 +56,6 @@ import type { OrderStatus, TrackedOrder } from '@/types';
  */
 
 const POLL_MS = 10_000;
-const TERMINAL: OrderStatus[] = ['Delivered', 'Cancelled'];
 
 const STEPS: Array<{ status: OrderStatus; label: string; note: string; icon: typeof Check }> = [
   {
@@ -132,13 +133,13 @@ export function OrderTracker({ token }: { token: string }) {
   }, [token, reloadToken]);
 
   const order = state?.order ?? null;
-  const isLive = order !== null && !TERMINAL.includes(order.status);
+  const live = order !== null && isLive(order.status);
 
   useEffect(() => {
-    if (!isLive) return;
+    if (!live) return;
     const timer = setInterval(() => setReloadToken((value) => value + 1), POLL_MS);
     return () => clearInterval(timer);
-  }, [isLive]);
+  }, [live]);
 
   if (state === null) return <TrackingSkeleton />;
 
@@ -157,8 +158,13 @@ export function OrderTracker({ token }: { token: string }) {
     );
   }
 
-  const cancelled = order.status === 'Cancelled';
   const delivered = order.status === 'Delivered';
+  const failed = order.status === 'Failed';
+  // Neither Cancelled nor Failed appears in STEPS, so findIndex returns -1 and
+  // every step renders as not-yet-started — a Dispatched order that failed
+  // would show a completely greyed-out timeline. Both get an explanation in
+  // place of the step list instead.
+  const stopped = isStopped(order.status);
   const currentStep = STEPS.findIndex((step) => step.status === order.status);
 
   const cancel = async () => {
@@ -206,9 +212,9 @@ export function OrderTracker({ token }: { token: string }) {
           aria-live="polite"
           className={cn(
             'rounded-full px-4 py-2 text-sm font-semibold',
-            cancelled && 'bg-destructive-soft text-destructive',
+            stopped && 'bg-destructive-soft text-destructive',
             delivered && 'bg-success-soft text-success',
-            !cancelled && !delivered && 'bg-amber-soft text-amber-foreground',
+            !stopped && !delivered && 'bg-amber-soft text-amber-foreground',
           )}
         >
           {order.status_label}
@@ -233,7 +239,7 @@ export function OrderTracker({ token }: { token: string }) {
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_380px] lg:gap-12">
         <div className="space-y-6">
-          {!cancelled && !delivered && (
+          {!stopped && !delivered && (
             <section className="flex items-center gap-4 rounded-4xl bg-primary p-6 text-primary-foreground">
               <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-amber">
                 <Zap className="size-6 text-amber-foreground" aria-hidden />
@@ -254,17 +260,36 @@ export function OrderTracker({ token }: { token: string }) {
           <section className="rounded-4xl border border-border/70 p-6">
             <h2 className="text-lg font-semibold">Progress</h2>
 
-            {cancelled ? (
+            {stopped ? (
               <div className="mt-5 flex items-start gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-full bg-destructive-soft">
-                  <XCircle className="size-5 text-destructive" aria-hidden />
+                  {failed ? (
+                    <PackageX className="size-5 text-destructive" aria-hidden />
+                  ) : (
+                    <XCircle className="size-5 text-destructive" aria-hidden />
+                  )}
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">Order cancelled</p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
-                    {order.cancellation_reason ?? 'This order was cancelled.'}
+                  <p className="text-sm font-semibold">
+                    {failed ? 'Delivery could not be completed' : 'Order cancelled'}
                   </p>
-                  {order.cancelled_at && (
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {/* The rider is required to give a reason for a failed
+                        delivery, and the server stores it here. It is the whole
+                        point of the transition — it is what the store reads
+                        back when the customer rings about it. */}
+                    {order.cancellation_reason ??
+                      (failed
+                        ? 'Your rider could not complete this delivery.'
+                        : 'This order was cancelled.')}
+                  </p>
+                  {failed ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      You have not been charged — this order was cash on
+                      delivery. Place it again whenever you are ready.
+                    </p>
+                  ) : null}
+                  {!failed && order.cancelled_at && (
                     <p className="num mt-0.5 text-xs text-muted-foreground">
                       {formatDateTime(order.cancelled_at)}
                     </p>
@@ -346,9 +371,7 @@ export function OrderTracker({ token }: { token: string }) {
                   <Store className="size-5 text-muted-foreground" aria-hidden />
                 </span>
                 <p className="text-sm text-muted-foreground">
-                  {delivered || cancelled
-                    ? 'No rider was assigned to this order.'
-                    : 'A rider is assigned once your order is packed and ready.'}
+                  {riderNote(order.status)}
                 </p>
               </div>
             )}
@@ -422,8 +445,16 @@ export function OrderTracker({ token }: { token: string }) {
                 <dt>Total</dt>
                 <dd className="num">{formatMoneyExact(order.grand_total)}</dd>
               </div>
+              {/* Cash on delivery means the money changes hands at the door,
+                  so an order that never reached the door was never paid. Saying
+                  "paid" under the total of a cancelled or failed order reads as
+                  a charge the customer then goes looking for. */}
               <p className="pt-1 text-xs text-muted-foreground">
-                Paid by cash on delivery.
+                {delivered
+                  ? 'Paid by cash on delivery.'
+                  : stopped
+                    ? 'Nothing was charged for this order.'
+                    : 'To be paid by cash on delivery.'}
               </p>
             </dl>
 
@@ -450,6 +481,21 @@ export function OrderTracker({ token }: { token: string }) {
       </div>
     </div>
   );
+}
+
+/**
+ * What to say when the tracking payload carries no rider.
+ *
+ * The server attaches one only while the order is Dispatched, so "nobody is
+ * attached" means something different at each end of the lifecycle: not yet for
+ * a live order, no longer for one that has stopped. A failed delivery is the
+ * case where the flat "no rider was assigned" reads as plainly false — someone
+ * did try.
+ */
+function riderNote(status: OrderStatus): string {
+  if (status === 'Failed') return 'The rider who attempted this delivery has been released from it.';
+  if (status === 'Delivered' || status === 'Cancelled') return 'No rider is attached to this order.';
+  return 'A rider is assigned once your order is packed and ready.';
 }
 
 function Row({ label, value }: { label: string; value: number }) {

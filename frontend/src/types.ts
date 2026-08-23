@@ -161,13 +161,23 @@ export interface BasketQuote {
   promised_minutes: number;
 }
 
+/**
+ * Mirrors `Order.STATUS_CHOICES` on the server, `Failed` included.
+ *
+ * `Failed` is what a rider reports when the bag never reached the customer —
+ * nobody at the address, a refused delivery, a stolen bike. It is terminal and
+ * it restocks nothing on its own. Leaving it out of this union does not stop
+ * the server sending it; it only stops the storefront recognising it, which
+ * shows the customer an order still cheerfully on its way.
+ */
 export type OrderStatus =
   | 'Placed'
   | 'Packing'
   | 'Ready'
   | 'Dispatched'
   | 'Delivered'
-  | 'Cancelled';
+  | 'Cancelled'
+  | 'Failed';
 
 export interface OrderItem {
   id: number;

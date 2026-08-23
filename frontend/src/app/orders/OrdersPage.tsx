@@ -6,11 +6,12 @@ import { ChevronRight, Loader2, Package, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { mergeLines } from '@/lib/cart-store';
 import { formatDateTime, formatMoneyExact } from '@/lib/format';
+import { isLive, isStopped } from '@/lib/order-status';
 import { buildReorder } from '@/lib/reorder';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useRecentOrders } from '@/hooks/useStoreData';
 import { cn } from '@/lib/utils';
-import type { OrderStatus, TrackedOrder } from '@/types';
+import type { TrackedOrder } from '@/types';
 import { trackOrder } from '@/lib/store-api';
 
 /**
@@ -24,8 +25,6 @@ import { trackOrder } from '@/lib/store-api';
  * Orders whose tokens 404 are dropped by `OrderTracker` when they are opened;
  * here they simply render as unavailable rather than vanishing mid-list.
  */
-
-const LIVE: OrderStatus[] = ['Placed', 'Packing', 'Ready', 'Dispatched'];
 
 export function OrdersPage() {
   const remembered = useRecentOrders();
@@ -140,7 +139,7 @@ export function OrdersPage() {
       <ul className="mt-10 space-y-4">
         {remembered.map((entry) => {
           const order = orders[entry.token];
-          const live = order ? LIVE.includes(order.status) : false;
+          const live = order ? isLive(order.status) : false;
 
           return (
             <li
@@ -165,7 +164,11 @@ export function OrdersPage() {
                     <span
                       className={cn(
                         'rounded-full px-3 py-1.5 text-xs font-semibold',
-                        order.status === 'Cancelled' && 'bg-destructive-soft text-destructive',
+                        // Failed is styled with Cancelled rather than left to
+                        // fall through all three: an unmatched status renders
+                        // an unstyled pill, which reads as an ordinary note
+                        // rather than as the order having gone wrong.
+                        isStopped(order.status) && 'bg-destructive-soft text-destructive',
                         order.status === 'Delivered' && 'bg-success-soft text-success',
                         live && 'bg-amber-soft text-amber-foreground',
                       )}
