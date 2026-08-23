@@ -35,6 +35,7 @@ import {
 import { ImageFallback } from '@/components/ProductCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAddressBook, useCart, useProfile, useStoreConfig } from '@/hooks/useStoreData';
+import { useDraft } from '@/hooks/useDraft';
 import { useQuote } from '@/hooks/useQuote';
 import { cn } from '@/lib/utils';
 import type { DeliveryType, UnavailableItem } from '@/types';
@@ -74,11 +75,20 @@ export function CheckoutPage() {
   const initialTier: DeliveryType =
     requested === 'instant' || requested === 'slow' ? requested : DEFAULT_DELIVERY_TYPE;
 
+  // The address book and the profile are both localStorage-backed, so both are
+  // empty on the first render and real one tick later. Every field seeded from
+  // them is therefore *derived* from them — `useState(profile.name)` captured
+  // the empty value and never let go of it, which is why the remembered name
+  // and number never appeared here.
+  const saved = selectedAddress(book);
+  const savedAddress = saved ? toDeliveryAddress(saved) : '';
+  const savedLandmark = saved?.landmark ?? '';
+
   const [deliveryType, setDeliveryType] = useState<DeliveryType>(initialTier);
-  const [name, setName] = useState(profile.name);
-  const [phone, setPhone] = useState(profile.phone);
-  const [addressText, setAddressText] = useState('');
-  const [landmark, setLandmark] = useState('');
+  const [name, setName] = useDraft(profile.name);
+  const [phone, setPhone] = useDraft(profile.phone);
+  const [address, setAddress, resetAddress] = useDraft(savedAddress);
+  const [landmark, setLandmark, resetLandmark] = useDraft(savedLandmark);
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [isPlacing, setIsPlacing] = useState(false);
@@ -112,7 +122,6 @@ export function CheckoutPage() {
   }, []);
 
   const { quote, isLoading, error } = useQuote(lines, deliveryType);
-  const saved = selectedAddress(book);
 
   const outsideArea = isDeliverable(coords, config) === false;
   const distanceKm = distanceFromStore(coords, config);
@@ -141,9 +150,11 @@ export function CheckoutPage() {
     );
   }
 
-  // A saved address fills the field unless the customer has typed over it.
-  const effectiveAddress = addressText || (saved ? toDeliveryAddress(saved) : '');
-  const effectiveLandmark = landmark || saved?.landmark || '';
+  // True once the customer has taken the field over, which is tracked rather
+  // than inferred from emptiness. Falling back whenever the box was empty meant
+  // a saved address could not be cleared: deleting the last character refilled
+  // it, so anyone delivering somewhere else had to leave a stray character in.
+  const addressOverridden = address !== savedAddress;
 
   const validate = (): boolean => {
     const next: FieldErrors = {};
@@ -153,7 +164,7 @@ export function CheckoutPage() {
     if (!isValidIndianMobile(phone)) {
       next.phone = 'Enter a 10-digit mobile number, like 98123 45678.';
     }
-    if (!isValidAddress(effectiveAddress)) {
+    if (!isValidAddress(address)) {
       next.address = 'Enter a full address a rider could actually find.';
     }
     setErrors(next);
@@ -192,8 +203,8 @@ export function CheckoutPage() {
         {
           customer_name: name.trim(),
           customer_phone: phone.trim(),
-          customer_address: effectiveAddress.trim(),
-          customer_landmark: effectiveLandmark.trim(),
+          customer_address: address.trim(),
+          customer_landmark: landmark.trim(),
           delivery_notes: notes.trim(),
           // Sent as a pair or not at all: the server rejects half a position,
           // because latitude without longitude is a client bug rather than a
@@ -278,15 +289,15 @@ export function CheckoutPage() {
             {book.entries.length > 0 && (
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {book.entries.map((entry) => {
-                  const active = entry.id === saved?.id && !addressText;
+                  const active = entry.id === saved?.id && !addressOverridden;
                   return (
                     <button
                       key={entry.id}
                       type="button"
                       onClick={() => {
                         selectAddress(entry.id);
-                        setAddressText('');
-                        setLandmark('');
+                        resetAddress();
+                        resetLandmark();
                         setErrors((current) => ({ ...current, address: undefined }));
                       }}
                       aria-pressed={active}
@@ -343,9 +354,9 @@ export function CheckoutPage() {
             <div className="mt-4">
               <Field
                 label="Delivery address"
-                value={effectiveAddress}
+                value={address}
                 onChange={(value) => {
-                  setAddressText(value);
+                  setAddress(value);
                   setErrors((current) => ({ ...current, address: undefined }));
                 }}
                 placeholder="House, street, locality"
@@ -398,7 +409,7 @@ export function CheckoutPage() {
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <Field
                 label="Landmark (optional)"
-                value={effectiveLandmark}
+                value={landmark}
                 onChange={setLandmark}
                 placeholder="Near the church, opposite the bank"
               />
@@ -410,15 +421,15 @@ export function CheckoutPage() {
               />
             </div>
 
-            {book.entries.length === 0 && isValidAddress(effectiveAddress) && (
+            {book.entries.length === 0 && isValidAddress(address) && (
               <button
                 type="button"
                 onClick={() => {
                   addAddress({
                     label: 'Home',
-                    line: effectiveAddress.trim(),
+                    line: address.trim(),
                     city: config?.store_city ?? '',
-                    landmark: effectiveLandmark.trim(),
+                    landmark: landmark.trim(),
                   });
                   toast.success('Address saved on this device');
                 }}

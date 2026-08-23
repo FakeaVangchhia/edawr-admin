@@ -9,6 +9,7 @@ import { clearProfile, hasProfile, saveProfile } from '@/lib/profile';
 import { formatMoneyExact } from '@/lib/format';
 import { isValidIndianMobile, isValidName } from '@/lib/validation';
 import { useAddressBook, useProfile, useRecentOrders } from '@/hooks/useStoreData';
+import { useDraft } from '@/hooks/useDraft';
 import { cn } from '@/lib/utils';
 
 /**
@@ -26,8 +27,12 @@ export function AccountPage() {
   const orders = useRecentOrders();
   const address = selectedAddress(book);
 
-  const [name, setName] = useState(profile.name);
-  const [phone, setPhone] = useState(profile.phone);
+  // Derived from the store rather than seeded from it once: the profile is
+  // empty on the first render and arrives a tick later, so `useState(...)`
+  // showed two blank boxes to a customer who had saved their details — and
+  // `save()` then wrote those blanks back over what was stored.
+  const [name, setName] = useDraft(profile.name);
+  const [phone, setPhone] = useDraft(profile.phone);
   const [touched, setTouched] = useState(false);
 
   const nameError = touched && name.trim() !== '' && !isValidName(name);
