@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { errorMessage } from '@/lib/api';
 
@@ -128,14 +128,35 @@ export function useDebounced<T>(value: T, delay = 250): T {
  * whatever was on screen when it was hidden, then waiting out the interval.
  */
 export function usePolling(callback: () => void, intervalMs: number, enabled = true): void {
+  /**
+   * The interval must not depend on the callback's identity.
+   *
+   * With `callback` in the dependency list, a caller who passes anything that
+   * is a new function each render — an inline arrow, or a `useCallback` keyed
+   * on the object `useResource` returns fresh every time — tears the interval
+   * down and builds a new one on every render. The countdown restarts from
+   * zero each time, so a manager typing in the search box (a render per
+   * keystroke, plus the debounce) keeps the fulfilment board from ever
+   * refreshing, for exactly as long as they keep working.
+   *
+   * Reading through a ref means the timer is created once and always calls the
+   * newest callback. This is a ref, not state, so the effect below is not
+   * setting state inside an effect.
+   */
+  const latest = useRef(callback);
+  useEffect(() => {
+    latest.current = callback;
+  });
+
   useEffect(() => {
     if (!enabled) return;
 
     let timer: ReturnType<typeof setInterval> | null = null;
+    const run = () => latest.current();
 
     const start = () => {
       if (timer !== null) return;
-      timer = setInterval(callback, intervalMs);
+      timer = setInterval(run, intervalMs);
     };
     const stop = () => {
       if (timer === null) return;
@@ -145,7 +166,7 @@ export function usePolling(callback: () => void, intervalMs: number, enabled = t
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        callback();
+        run();
         start();
       } else {
         stop();
@@ -159,5 +180,5 @@ export function usePolling(callback: () => void, intervalMs: number, enabled = t
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [callback, intervalMs, enabled]);
+  }, [intervalMs, enabled]);
 }

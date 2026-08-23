@@ -15,9 +15,11 @@ import type { Category, Product } from '@/types';
  * **Editing sends PATCH, not PUT, and that is the important thing in this file.**
  * A PUT writes every column from a body assembled when the drawer opened, so
  * two units sold while the form was on screen are silently written back onto
- * the shelf. `updateProduct` sends only what changed, under a row lock. The
- * effect is invisible until it costs someone real stock, which is exactly why
- * it is worth a comment rather than a convention.
+ * the shelf. PATCH only helps if the body is actually partial, though — the
+ * server builds its `update_fields` from the keys it receives — so `onSubmit`
+ * diffs the form against the snapshot it was seeded with and sends the
+ * difference. The effect is invisible until it costs someone real stock, which
+ * is exactly why it is worth a comment rather than a convention.
  *
  * Form state is a flat record of strings because that is what inputs hold.
  * Converting at the boundary — once, on submit — keeps every field's handler
@@ -85,6 +87,9 @@ export function ProductDrawer({
   const [form, setForm] = useState<FormState>(() =>
     product ? toForm(product) : EMPTY,
   );
+  // The form as it was seeded. `onSubmit` diffs against it so an untouched
+  // field is left out of the PATCH entirely — see the note there.
+  const [initial, setInitial] = useState<FormState>(form);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -95,8 +100,10 @@ export function ProductDrawer({
   // in the parent would also work; this keeps the parent simpler.
   const [seededFor, setSeededFor] = useState<number | null>(product?.id ?? null);
   if (open && (product?.id ?? null) !== seededFor) {
+    const seeded = product ? toForm(product) : EMPTY;
     setSeededFor(product?.id ?? null);
-    setForm(product ? toForm(product) : EMPTY);
+    setForm(seeded);
+    setInitial(seeded);
     setError('');
     setFieldErrors({});
   }
@@ -164,10 +171,27 @@ export function ProductDrawer({
       image_url: text(form.image_url),
     } as unknown as Partial<Product>;
 
+    // Assembling every column and PATCHing all of it is a PUT wearing a
+    // different verb: `stock` would ride along at the value the form was seeded
+    // with, and two units sold while the drawer was open would be written back
+    // onto the shelf. Every key above is also a key of FormState, so comparing
+    // the two string records tells us exactly which fields the user touched —
+    // an untouched field is byte-identical and never reaches the request.
+    const changed = Object.fromEntries(
+      Object.entries(body).filter(([key]) => form[key] !== initial[key]),
+    ) as Partial<Product>;
+
+    if (product && Object.keys(changed).length === 0) {
+      // Nothing to write. Saving anyway would cost an audit row saying nobody
+      // changed anything.
+      onSaved();
+      return;
+    }
+
     setSaving(true);
     try {
       if (product) {
-        await updateProduct(product.id, body);
+        await updateProduct(product.id, changed);
       } else {
         await createProduct(body);
       }

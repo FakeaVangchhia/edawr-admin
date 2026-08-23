@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from 'react';
 
 import { errorMessage } from '@/lib/api';
 import { login } from '@/lib/queries';
+import { safeNext } from '@/lib/redirect';
 import { writeSession } from '@/lib/session';
 import { useSession } from '@/lib/use-session';
 
@@ -34,10 +35,20 @@ function LoginForm() {
     return '';
   });
 
-  // Strip the query parameter so a refresh does not re-show the notice, and so
-  // the URL is not littered when the operator bookmarks the page.
+  // Where to land afterwards, read once into state for the same reason as
+  // `notice` above — and it has to be, not merely tidily. `ConsoleShell` sends
+  // an expired session here as `?reason=expired&next=%2Forders`, and the effect
+  // below rewrites the URL to `/login`. Next patches `history.replaceState` to
+  // keep the router in step, so `useSearchParams()` re-renders empty: anything
+  // reading `next` after that point gets nothing and lands on the dashboard,
+  // silently dropping the deep link this parameter exists to preserve.
+  const [next] = useState(() => safeNext(params.get('next')));
+
+  // Strip the query parameters so a refresh does not re-show the notice, and so
+  // the URL is not littered when the operator bookmarks the page. Both values
+  // are already in state by now.
   useEffect(() => {
-    if (params.get('reason')) {
+    if (params.get('reason') || params.get('next')) {
       window.history.replaceState(null, '', '/login');
     }
   }, [params]);
@@ -46,8 +57,8 @@ function LoginForm() {
   // who was deep-linked to /orders and bounced through login lands back there
   // rather than at the dashboard.
   useEffect(() => {
-    if (session) router.replace(params.get('next') || '/');
-  }, [session, router, params]);
+    if (session) router.replace(next);
+  }, [session, router, next]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -62,7 +73,7 @@ function LoginForm() {
     setSubmitting(true);
     try {
       writeSession(await login(trimmedEmail, password));
-      router.replace(params.get('next') || '/');
+      router.replace(next);
     } catch (caught) {
       // The backend returns one message whether the email is unknown or the
       // password is wrong, so this cannot be used to enumerate accounts. It is

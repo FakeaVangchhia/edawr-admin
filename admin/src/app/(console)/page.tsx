@@ -2,7 +2,7 @@
 
 import { AlertTriangle, ArrowRight, PackageX } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 
 import { LineChart, StatTile } from '@/components/charts';
 import {
@@ -38,8 +38,7 @@ export default function OverviewPage() {
     listOrders({ open: true, limit: 100 }, signal),
   );
 
-  const refreshLive = useCallback(() => open.refresh(), [open]);
-  usePolling(refreshLive, 15_000);
+  usePolling(open.refresh, 15_000);
 
   const openOrders = open.data?.rows ?? [];
   const late = openOrders.filter((order) => order.is_late);

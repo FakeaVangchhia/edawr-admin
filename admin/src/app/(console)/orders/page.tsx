@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertTriangle, LayoutGrid, RefreshCw, Rows3, Search } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { clsx } from 'clsx';
 
@@ -82,7 +82,11 @@ export default function OrdersPage() {
 
   // Poll the board, not the table. A live fulfilment board has to be current;
   // a filtered history from last Tuesday does not change while you read it.
-  const refresh = useCallback(() => orders.refresh(), [orders]);
+  // `orders.refresh` is already stable — a useCallback with no dependencies,
+  // inside useResource. Wrapping it in another useCallback keyed on `orders`,
+  // which is a new object every render, was what made it unstable, and an
+  // unstable callback used to restart the interval on every keystroke.
+  const refresh = orders.refresh;
   usePolling(refresh, 15_000, isBoard);
 
   const rows = orders.data?.rows ?? [];
