@@ -37,7 +37,7 @@ uv run manage.py migrate                 # create/update the schema
 uv run manage.py seed                    # load sample data (deletes all rows)
 uv run manage.py runserver 8000          # use 0.0.0.0:8000 for the phone
 uv run manage.py makemigrations          # after editing api/models.py
-uv run manage.py test                    # 351 tests, ~13s on Postgres
+uv run manage.py test                    # 446 tests, ~10s on Postgres
 uv run manage.py check --deploy          # before shipping
 ```
 
@@ -55,10 +55,14 @@ uv run manage.py seed_admin --email you@example.com --password '...' --role admi
 uv run manage.py demo_clear --dry-run     # then without the flag
 ```
 
-**The mobile app has no tests and no test runner, and `frontend/` has no
-component or end-to-end tests** — only pure logic (cart store, money formatting,
-the delivery-zone helper), because `@testing-library/react` is not installed
-there. `admin/` does install it and does render components in tests. End-to-end
+**The mobile app has no tests and no test runner.** `frontend/` has no
+`@testing-library/react`, so its tests are pure logic plus two files that render
+by hand — `ImageFallback.test.tsx` through `react-dom/server`, and
+`useDraft.test.tsx` through `react-dom/client` and React's own `act`, driving
+the hook via real DOM events because the compiler's lint rules forbid a
+component writing to anything outside itself during render. That covers a hook
+and a presentational component; it does not scale to `CheckoutPage`. `admin/`
+does install Testing Library and does render components. End-to-end
 coverage is still missing everywhere; if you touch a package substantially,
 consider whether you can leave a test behind.
 
@@ -127,6 +131,35 @@ insert and stock decrement all land together or not at all. The lock is a no-op
 on SQLite — which is why `DATABASE_URL` must point at Postgres before real
 traffic.
 
+### Checkout is idempotent on `Idempotency-Key`
+A retried POST used to create a second order and decrement stock twice, and on
+Aizawl mobile data a retry is the normal case. The key arrives as a **header**,
+never a body field — the checkout body is the money boundary and stays ids and
+quantities only — and is deduped by a unique constraint on
+`Order.idempotency_key`. A replay answers **200**, not 201: it created nothing.
+
+`place_order` is a thin non-atomic wrapper around `_place_order`. The ordering
+is load-bearing: the dedupe read is *outside* the transaction, or every retry
+holds product locks while it looks; and the `IntegrityError` recovery is in the
+wrapper, because a rolled-back atomic block cannot run another query.
+
+The storefront's key is derived from the basket (`lib/checkout-attempt.ts`) and
+persisted. A key that outlived its basket would be worse than none: the server
+would recognise it and hand back the *previous* order, so a second order would
+silently never be placed.
+
+### Reaching Delivered records the cash
+`payment_method = "cod"` is an intention. `paid_at`, `amount_collected` and
+`collected_by` are what happened, and `advance_status()` stamps the first two on
+the move to Delivered — in the model, not in a view, so no route there can omit
+them. `amount_collected` defaults to `grand_total`; a rider revises it down when
+the customer paid short, and above the total is a 400 (that is change owed back,
+not revenue).
+
+`GET /api/analytics/cash` is the only endpoint in `analytics.py` that buckets by
+`paid_at` rather than `created_at`, because it answers "what is in the till
+tonight" and an order placed at 23:50 and delivered at 00:05 is tomorrow's cash.
+
 ### Auth
 - `api/authentication.py` answers *who is this?* and never rejects.
 - `api/permissions.py` answers *may they?* and rejects.
@@ -137,6 +170,17 @@ traffic.
   take no rider id and each checks ownership.
 - `is_active` is re-checked on every request, so deactivating a rider revokes
   access immediately rather than when their 12-hour token expires.
+- **Tokens carry `ver`, and a bump signs out every device.** `ver` is the
+  account's `token_version`, compared against the row the auth class already
+  reads; `POST /api/auth/logout` (and the rider's) increments it, as does a
+  password or PIN reset. A retired token is **401** — we no longer know who is
+  calling — so the client clears its session. Per-device revocation would need a
+  blacklist that outlives the token; this is deliberately coarser.
+- **`ait` bounds the session, not the token.** `/api/auth/me` mints a fresh
+  token on every call, so without a claim that survives refresh a stolen token
+  renews itself forever. `ait` records when the session began, is copied forward
+  unchanged, and `/me` refuses past `SESSION_MAX_HOURS` (a week). Ordinary
+  requests are unaffected — only renewal is capped.
 - A valid token of the wrong kind gets **403**, not 401. 401 means "I don't know
   who you are" and is what makes the web app clear its stored session; clearing
   it on 403 would sign an admin out of pages they merely lack rights for.
@@ -227,6 +271,19 @@ handler. See `Storefront.tsx` and `ManagerDashboard.tsx`.
 `src/lib/cart-store.ts` + `useSyncExternalStore`. No provider, no hydration
 mismatch, and two browser tabs share one basket. The cart holds a **display**
 snapshot of prices; the bill always comes from the server.
+
+### Failures are reported, same-origin
+All three clients POST to `/api/client-errors`, and both CSPs name
+`/api/csp-report`. Same-origin rather than a third-party collector because
+`proxy.ts` builds `connect-src` from `NEXT_PUBLIC_API_URL` and allows nothing
+else — and because a CSP violation is sent by the browser's reporting agent, so
+it needs no `connect-src` entry at all. Both endpoints are public, throttled,
+and **allowlist every field they log**: an endpoint that logged whatever arrived
+would be a PII sink any passer-by could fill.
+
+Every reporter is written so it cannot throw and cannot block. It runs at the
+moment the app is already failing, and an error path that can itself fail is one
+that gets retried in a loop.
 
 ### Conventions
 - Path alias `@/*` → `src/*`.

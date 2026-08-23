@@ -113,9 +113,9 @@ can reach it. Seeded rider: `+919000000002` / PIN `4813`.
 ## Tests
 
 ```bash
-cd backend  && uv run manage.py test       # 351 tests, ~13s (Postgres)
-cd frontend && npm test                    # 131 tests, ~4s
-cd admin    && npm test                    # 40 tests, ~7s
+cd backend  && uv run manage.py test       # 446 tests, ~10s (Postgres)
+cd frontend && npm test                    # 201 tests, ~5s
+cd admin    && npm test                    # 66 tests, ~4s
 ```
 
 CI runs all three on every push — see `.github/workflows/ci.yml`.

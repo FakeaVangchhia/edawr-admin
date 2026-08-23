@@ -1,9 +1,13 @@
 # Run the tests on every push and pull request.
 #
-# There was no CI at all before this: 348 backend tests, 131 storefront tests
-# and 40 console tests that ran only when someone remembered. Manual deploys are
-# fine at this scale for a long time — untested merges are not, and that is the
-# gap this closes. Deployment stays manual on purpose; see PRODUCTION.md.
+# There was no CI at all before this: tests that ran only when someone
+# remembered. Manual deploys are fine at this scale for a long time — untested
+# merges are not, and that is the gap this closes. Deployment stays manual on
+# purpose; see PRODUCTION.md.
+#
+# Counts are deliberately not written down here. They were, and they went stale
+# within a fortnight, which taught the next reader to distrust the comment
+# rather than to update it. `npm test` and `manage.py test` report the truth.
 #
 # **The backend is a separate git repository** (`edawr-backend`), ignored by the
 # root repo, so this file cannot test it from here. The `backend` job below is
@@ -47,6 +51,12 @@ jobs:
       - run: npm ci
 
       - run: npm run lint
+
+      # Before the tests, and separately from the build. `next build` does
+      # typecheck, but it is the slowest step in the job and it runs last — so
+      # a one-character type error used to cost a full production build before
+      # anything said so.
+      - run: npx tsc --noEmit
 
       - run: npm test
 
@@ -92,6 +102,7 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      - run: npx tsc --noEmit
       - run: npm test
 
       - name: Build
@@ -107,6 +118,40 @@ jobs:
             echo "$stray"
             exit 1
           fi
+
+  # ---------------------------------------------------------------------------
+  # The rider app had no CI at all: not linted, not typechecked, not built, and
+  # with no test runner to run. It is also the package where a mistake is
+  # hardest to correct — there is no expo-updates channel, so a fix means a
+  # store submission and a rider updating an app mid-shift.
+  #
+  # These two checks are what the package actually supports today. `expo-doctor`
+  # is not ceremony: it catches a dependency whose version disagrees with the
+  # installed Expo SDK, which is the failure mode that produces a build that
+  # compiles and crashes on a real device.
+  #
+  # No test job, because there is no test runner. Adding jest-expo is a real
+  # piece of work and is listed in PRODUCTION.md Part 4 rather than pretended at
+  # here.
+  # ---------------------------------------------------------------------------
+  mobile:
+    name: Rider app (mobile/)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx expo-doctor
 
   # ---------------------------------------------------------------------------
   # The API's pipeline. This job does nothing in *this* repository — `backend/`

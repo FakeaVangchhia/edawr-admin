@@ -223,6 +223,32 @@ gcloud storage buckets create gs://edawr-uploads \
 Keep it private. It is reached through the volume mount, not the public
 internet. Part 3 explains why it is a mount rather than public object storage.
 
+## Step 3b — The backups bucket, and why it is a second one
+
+```bash
+gcloud storage buckets create gs://edawr-backups \
+  --location=asia-south1 --uniform-bucket-level-access
+```
+
+**It must not be the uploads bucket.** `SERVE_MEDIA=true` in production makes
+Django serve everything under `/app/uploads` to anyone who asks — that is a
+deliberate trade explained in Part 3 — so a `pg_dump` written there would be a
+downloadable copy of every customer's name, phone number and address, reachable
+by guessing a filename. `manage.py backup_database` refuses to run if
+`BACKUP_DIR` resolves inside `MEDIA_ROOT`, rather than trusting anyone to have
+noticed.
+
+Grant it to the same service account as the uploads bucket in Step 4, and mount
+it alongside the other volume in Step 5:
+
+```
+  --add-volume name=backups,type=cloud-storage,bucket=edawr-backups,mount-options="uid=10001;gid=10001;file-mode=600;dir-mode=700" \
+  --add-volume-mount volume=backups,mount-path=/app/backups
+```
+
+`file-mode=600`, tighter than uploads' `644`. Nothing serves these and nothing
+else should read them.
+
 ## Step 4 — Secrets
 
 ```bash
@@ -324,6 +350,52 @@ Migration `0007` creates the `store_settings` row, so the store has opening
 hours and a delivery radius before the first request rather than being
 configured by whichever request happens to arrive first.
 
+## Step 6b — Scheduled backups
+
+**Do this before the first real order.** Order history *is* the business record
+of a cash shop, and Neon's free tier keeps a short restore window that is not a
+backup strategy.
+
+```bash
+IMAGE=$(gcloud run services describe edawr-api --region asia-south1 \
+  --format='value(spec.template.spec.containers[0].image)')
+
+gcloud run jobs create edawr-backup \
+  --image "$IMAGE" --region asia-south1 \
+  --command python --args manage.py,backup_database \
+  --add-volume name=backups,type=cloud-storage,bucket=edawr-backups,mount-options="uid=10001;gid=10001;file-mode=600;dir-mode=700" \
+  --add-volume-mount volume=backups,mount-path=/app/backups \
+  --set-secrets "JWT_SECRET=edawr-jwt-secret:latest,DJANGO_SECRET_KEY=edawr-django-secret:latest,DATABASE_URL=edawr-database-url:latest,CACHE_URL=edawr-cache-url:latest" \
+  --set-env-vars "ENVIRONMENT=production,ALLOWED_HOSTS=edawr-api-xxxxx-el.a.run.app,CORS_ORIGINS=https://placeholder.invalid,BACKUP_DIR=/app/backups"
+
+gcloud run jobs execute edawr-backup --region asia-south1 --wait
+```
+
+Then have Cloud Scheduler run it nightly, after closing:
+
+```bash
+gcloud scheduler jobs create http edawr-backup-nightly \
+  --location asia-south1 --schedule "30 17 * * *" --time-zone Asia/Kolkata \
+  --uri "https://asia-south1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$(gcloud config get-value project)/jobs/edawr-backup:run" \
+  --http-method POST --oauth-service-account-email "$SA"
+```
+
+Three things worth knowing:
+
+- **`pg_dump` must be at least the server's major version.** The image installs
+  `postgresql-client-17` from PGDG because Debian bookworm ships 15 and Neon
+  runs 17; an older client refuses to dump a newer server. If Neon is upgraded,
+  that line in the Dockerfile goes up with it.
+- **Nothing is pruned until the new archive verifies.** Exit status, plausible
+  size, and `pg_restore --list` can read it. A rotation that trims yesterday's
+  good backup to make room for today's broken one is worse than no rotation.
+- **Restore it once, now, before you need to.** A backup nobody has restored is
+  a hypothesis:
+
+  ```bash
+  pg_restore --no-owner --no-privileges -d "$SCRATCH_DATABASE_URL" edawr-<stamp>.dump
+  ```
+
 ## Step 7 — The first admin
 
 **Never run `manage.py seed` against production.** It deletes every row before
@@ -403,6 +475,16 @@ Then, in order of how likely each is to be misconfigured:
 2. **Place a real order end to end** — browse, add, checkout, track. Watch the
    browser console for CSP violations; there should be none.
 3. **Sign in on the rider app**, accept the order, and mark it delivered.
+   Then mark one **paid short** and check the console's Cash screen shows the
+   difference against that rider.
+4. **Replay the checkout POST** with the same `Idempotency-Key`. The second call
+   must answer **200** with the same order id, and the product's stock must have
+   moved exactly once. A unit test asserts this; only a real replay proves it.
+5. **Sign out of the console, then replay a request with the token you copied
+   out of `localStorage` first.** It must answer **401**, not 200 and not 403.
+6. **Check the browser console for CSP violations — there should be none.** The
+   `Reporting-Endpoints` header is new and is on the CSP path, which is exactly
+   the kind of thing that only breaks in a production build.
 
 If the container never turns healthy, read the logs. `check_production_safety()`
 raises a `RuntimeError` naming exactly which setting is wrong:
@@ -488,19 +570,23 @@ ones marked **required** are refused at startup outside development by
 | `CACHE_URL` | unset | **Required.** `rediss://…` |
 | `CORS_ORIGINS` | localhost:3000 | **Required.** Both frontend origins. No wildcards |
 | `JWT_ALGORITHM` | `HS256` | |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `720` | 12 hours |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `720` | 12 hours. How long one token lasts |
+| `SESSION_MAX_HOURS` | `168` | A week. How long a session may keep *renewing* — see below |
 | `NUM_PROXIES` | `1` outside dev | **Wrong here voids every rate limit.** See below |
 | `LOGIN_RATE_LIMIT` | `10/min` | Guards a 4-digit rider PIN |
 | `CHECKOUT_RATE_LIMIT` | `12/hour` | Public, and it writes rows and moves stock |
 | `TRACKING_RATE_LIMIT` | `120/min` | Polled by an open browser tab |
 | `ANON_RATE_LIMIT` | `240/min` | Backstop for everything else public |
 | `STAFF_RATE_LIMIT` | `600/min` | Authenticated staff, keyed per account |
+| `REPORT_RATE_LIMIT` | `60/min` | Crash and CSP reports. Public, so bounded |
 | `SECURE_SSL_REDIRECT` | `true` outside dev | |
 | `TRUST_PROXY_SSL_HEADER` | `true` outside dev | Only safe behind a proxy that sets it |
 | `SECURE_HSTS_SECONDS` | `31536000` | A year. Browsers cache it that long — start lower if unsure |
 | `SERVE_API_DOCS` | on in dev only | `/docs` is a map of the attack surface |
 | `SERVE_MEDIA` | on in dev only | **Set `true` in production here** — see the bucket note |
 | `UPLOAD_DIR` | `uploads` | Becomes `MEDIA_ROOT` |
+| `BACKUP_DIR` | `backups` | **Must not be under `MEDIA_ROOT`** — see Step 3b |
+| `BACKUP_KEEP` | `14` | Archives retained before the oldest is pruned |
 | `DATA_UPLOAD_MAX_MEMORY_SIZE` | `10485760` | The upload view caps images at 5 MB separately |
 | `FREE_DELIVERY_ABOVE` | `199.00` | Money as strings — a float reintroduces the rounding error |
 | `HANDLING_FEE` | `5.00` | |
@@ -527,6 +613,35 @@ promising 15-minute delivery it cannot make.
 
 For the frontends there is exactly one variable each, `NEXT_PUBLIC_API_URL`, and
 it is read at build time as well as runtime.
+
+## `SESSION_MAX_HOURS`, and why a 12-hour token is not a 12-hour session
+
+`/api/auth/me` mints a **fresh** token on every call, and both web clients call
+it on startup. That is what keeps a manager signed in across a shift, and it
+also means that without a ceiling a session renews itself forever: a token
+copied out of the console's `localStorage` is a permanent credential, renewable
+by whoever holds it on exactly the same cadence as its owner.
+
+Two claims bound it:
+
+- **`ver`** is the account's `token_version` column, compared on every request
+  against the row the authentication class already reads. `POST /api/auth/logout`
+  increments it, which retires every token that account holds — so signing out
+  is a server-side act rather than a client deleting its own copy. It signs out
+  every device, which is the right trade at one console per person and one phone
+  per rider; per-token revocation needs a blacklist that outlives the token.
+- **`ait`** — *auth issued at* — records when the session began, as distinct
+  from `iat`, which is when this particular token was signed. It is copied
+  forward unchanged across refreshes, and `/me` refuses to renew past
+  `SESSION_MAX_HOURS` from it.
+
+A password or PIN reset bumps the version too. A reset that leaves the old
+sessions working is not a reset — the usual reason to change a credential is
+that the old one is compromised.
+
+Note the ceiling caps *renewal* only. A token inside its twelve hours keeps
+working right up to its own expiry; cutting a rider off mid-delivery because
+their session is a week old would be worse than the risk it avoids.
 
 ## `NUM_PROXIES`, and why a wrong value silently disables every rate limit
 
@@ -663,13 +778,18 @@ money) and an alert on 5xx rate.
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- **storefront** — `npm ci`, lint, 131 tests, production build, and a check that
+- **storefront** — `npm ci`, lint, `tsc --noEmit`, 201 tests, production build,
+  and a check that
   **no route prerenders**. That last one is not ceremony: a layout that stops
   being dynamic passes every other check and ships a storefront that paints and
   never hydrates.
-- **console** — the same, with 40 tests.
+- **console** — the same, with 66 tests.
+- **rider app** — `npm ci`, `tsc --noEmit`, `expo-doctor`. No test job,
+  because there is no test runner; see Part 4. It was in no CI job at all
+  until recently, which is worth knowing given it is also the package where
+  a mistake is hardest to correct — no OTA channel means a store submission.
 - **backend** — disabled in this repo (`backend/` is gitignored here) and live in
-  the `edawr-backend` repository, where the identical job runs 351 tests against
+  the `edawr-backend` repository, where the identical job runs 446 tests against
   a **Postgres service container**, checks migrations are committed
   (`makemigrations --check`), and runs `check --deploy` with production settings.
 
@@ -682,10 +802,10 @@ Deploys stay manual. At this scale that is fine; untested merges are not.
 ## Test suites
 
 ```bash
-cd backend  && uv run manage.py test    # 351 tests, ~13s against Postgres
-cd frontend && npm test                 # 131 tests, ~4s
-cd admin    && npm test                 # 40 tests, ~7s
-cd mobile   && npx tsc --noEmit         # no test runner — see Part 4
+cd backend  && uv run manage.py test    # 446 tests, ~10s against Postgres
+cd frontend && npm test                 # 201 tests, ~5s
+cd admin    && npm test                 # 66 tests, ~4s
+cd mobile   && npm run typecheck        # no test runner — see Part 4
 ```
 
 The backend suite is the substantial one: pricing arithmetic, the state machine,
@@ -714,62 +834,61 @@ test would fail after ten at night.
    removed deliberately.
 
 ---
-
 # Part 4 — What is still missing
 
 An honest inventory, ranked by what would bite a real store first. Everything
 here is known and deliberately deferred.
 
+Six items that were in this list are not any more. They are recorded at the end
+under *Recently closed*, with what to check if one of them misbehaves — a gap
+list that only grows teaches people to stop reading it.
+
 ## Before taking real money
-
-**No automated backups.** The highest-value item in this document. Neon's free
-tier keeps a short restore window, and that is not a backup strategy for order
-history — which *is* the business record for a cash business. Schedule a
-`pg_dump` to Cloud Storage before the first real order.
-
-**Cash is recorded as intent, never as collection.** `payment_method = "cod"` is
-the entire payment model. There is no `paid_at`, no `amount_collected`, no
-reconciliation view. At end of shift there is no way to answer "how much cash
-does this rider owe the till?" beyond summing `grand_total` and trusting it. For
-a cash business that is the primary shrinkage vector, and it is the largest
-remaining functional gap.
 
 **No out-of-band notification.** The customer's only channel is keeping a
 browser tab open on `/order/{token}`. Close the tab and they have no idea when
 the rider is coming. For COD in a market where SMS and WhatsApp are the norm,
-this alone will generate a support call per order.
+this alone will generate a support call per order. It needs a provider account
+and a per-message cost, which is why it is not done rather than because it is
+hard: the send would be one call from `OrderStatusView`.
 
 **No receipt, no invoice, no tax fields.** No PDF, no email, no printable view.
 `Product` has no HSN code and no tax field; `Order` has no GSTIN and no invoice
 number. If turnover crosses the GST registration threshold, a compliant tax
-invoice cannot be issued from this system.
+invoice cannot be issued from this system. Note the schema is now closer than it
+was — `paid_at` and `amount_collected` are exactly the columns an invoice has to
+cite — but the tax decisions are the store's, not the code's.
 
 **Customer order history is a localStorage key.** `edawr-recent-orders-v1`,
 capped at ten, and the tracking token is the only proof of ownership. Clearing
 site data, switching phones or using private browsing permanently loses access
-to every past order.
-
-**Checkout is not idempotent.** A retried POST on flaky mobile data creates a
-second order and decrements stock twice.
-
-**No logout or token revocation.** `MeView` mints a fresh token on every call,
-so a stolen admin token can be renewed indefinitely.
+to every past order. The storefront now *says* so when the write fails, which is
+a caveat rather than a fix; a real fix means customer accounts, and the only
+sane identity for this market is a phone number, which means OTP, which means
+the SMS provider above. These two gaps are one gap.
 
 ## Operational
 
-**No error tracking.** No Sentry anywhere. `/api/health` and `/api/health/ready`
-are well built and nothing polls them. On a product whose whole promise is
-fifteen minutes, nothing aggregates whether the promise is met —
-`delivered_in_minutes` and `was_late` are stamped per order and never rolled up
-beyond the analytics screen.
+**No third-party error tracking or alerting.** Crashes and CSP violations from
+all three clients now reach `POST /api/client-errors` and `/api/csp-report` and
+land in Cloud Logging as structured JSON — so failures are *visible*, which they
+were not. Nothing yet *pages* anybody: there is no alert on 5xx rate, no billing
+alert, and nothing polls `/api/health/ready`. Those are console configuration
+rather than code, and they are the cheapest remaining safety improvement.
 
-**Rate limiting is unobservable.** Nothing logs when a throttle trips, and there
-is no per-account lockout. Riders behind one carrier NAT still share the login
-budget.
+**Nothing rolls up the fifteen-minute promise.** `delivered_in_minutes` and
+`was_late` are stamped per order and appear on the analytics screen; no trend,
+no alert when the promise starts slipping.
+
+**No per-account lockout.** Throttle trips are now logged, so a brute-force
+attempt against a rider PIN is at least visible. Riders behind one carrier NAT
+still share the login budget, and nothing locks an individual account after
+repeated failures.
 
 **Split repository.** `backend/` is gitignored from the root repo, so a change
 spanning backend and frontend cannot be one commit, one PR, one CI run or one
-rollback. `git subtree` is the fix if this becomes painful.
+rollback. This round was exactly such a change and it took two of each.
+`git subtree` is the fix when this becomes painful enough.
 
 **Rider dispatch is pull as well as push.** With `AUTO_ASSIGN_RIDER` on, a Ready
 order is handed to the nearest eligible rider. With it off, every available
@@ -787,26 +906,42 @@ genuinely 6 km address may be a twenty-minute ride.
 suites are unit and integration tests; nothing drives a real browser.
 
 **No component tests in `frontend/`.** `@testing-library/react` is not installed
-there, so its 131 tests are pure logic only — the cart store, money formatting,
-the delivery-zone helper. `admin/` does install it and does render components.
-
-**No concurrency test.** `checkout.py`'s most carefully reasoned invariant — that
-`select_for_update` stops the last unit being sold twice — is verified only by
-argument. It now *could* be tested, since both local development and CI run on
-Postgres.
+there. Its tests are pure logic plus two files that render through
+`react-dom/server` and `react-dom/client` by hand — which covers a hook and a
+presentational component and does not scale to `CheckoutPage`. `admin/` does
+install it and does render components.
 
 **The mobile app has no tests and no test runner.** `jest-expo` is the standard
-choice for SDK 54; adding the first test means configuring it from scratch.
-`npx tsc --noEmit` and `npx expo-doctor` are the only automated checks it has.
+choice for SDK 54; adding the first test means configuring it from scratch. CI
+now runs `tsc --noEmit` and `expo-doctor` on it, which is two more checks than
+it had and still not a test.
 
 ## Smaller things
 
-- Admin cancellations can record a reason, but `?stalled=true` still computes
-  reachability per order in Python — O(n) queries on a paged endpoint.
+- `?stalled=true` computes reachability per order in Python — O(n) queries on a
+  paged endpoint.
 - Uploads are size- and type-checked but never scanned.
-- `Order` has six lifecycle timestamps and no record of *which* admin or rider
-  made each transition; `AuditLog` covers admin actions but not rider ones.
+- `Order` has six lifecycle timestamps and records which rider collected the
+  cash, but not which actor made each *transition*. `AuditLog` covers the status
+  endpoint for both admins and riders; `OrderAcceptView` and `OrderRejectView`
+  still write no audit row.
 - The rider app's session profile is captured at login and refreshed only on
   restart, so a changed service radius shows stale in the hero card.
-- `backend/edawr-sqlalchemy-backup.db` and `backend/edawr.db` are pre-Postgres
-  SQLite files. Nothing reads them. Delete them once you are satisfied.
+- The rider app has no `expo-updates` channel, so any fix to it requires a store
+  submission. That is the reason its CI checks matter more than they look.
+- `style-src 'unsafe-inline'` in both CSPs, for Tailwind v4 and `next/font`.
+  Documented in `proxy.ts`; the weakest link in the policy and still not a hole.
+
+## Recently closed
+
+Kept here because knowing where a thing was *just* added is what you want when
+it misbehaves.
+
+| Was missing | Now | Check first |
+|---|---|---|
+| Automated backups | `manage.py backup_database`, a Cloud Run Job and a Scheduler trigger (Steps 3b, 6b) | `pg_dump` version vs Neon's; `BACKUP_DIR` not under `MEDIA_ROOT` |
+| Cash recorded as intent only | `paid_at`, `amount_collected`, `collected_by`, stamped in `advance_status`; `/api/analytics/cash`; the console's Cash screen; "Paid less" in the rider app | Buckets by `paid_at`, not `created_at` — see `collected_orders` |
+| Checkout not idempotent | `Idempotency-Key` header, unique `Order.idempotency_key`, replay answers 200 | The dedupe read is outside the transaction on purpose |
+| No logout or token revocation | `ver` and `ait` claims, `/api/auth/logout` and the rider's, `SESSION_MAX_HOURS` | A retired token is **401**, never 403 |
+| No error tracking | `/api/client-errors` and `/api/csp-report`; boundaries in all three clients | Reports are allowlisted; unknown keys are dropped |
+| Concurrency untested | `api/tests/test_idempotency.py`, two threads on `APITransactionTestBase` | It needs real commits; the ordinary test base tests nothing here |
