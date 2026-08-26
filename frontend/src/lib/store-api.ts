@@ -1,5 +1,6 @@
 import { basketSignature, checkoutAttemptKey } from './checkout-attempt';
-import { request } from './api';
+import { ApiError, request } from './api';
+import { readToken } from './session';
 import type {
   BasketQuote,
   CartLine,
@@ -13,10 +14,15 @@ import type {
 /**
  * The public storefront endpoints, typed.
  *
- * Every call here is anonymous — a customer has no account. The order endpoints
- * are keyed on an unguessable tracking token rather than an order id, which is
- * what lets them stay public without exposing every customer's address to
- * anyone who can count.
+ * Every call here is anonymous, with exactly one exception: `placeOrder`
+ * attaches the customer's token when there is one, so the order can be linked
+ * to their account. It is still a public endpoint and still works with no token
+ * at all — guest checkout is the main path, not a fallback. Everything in the
+ * account's own surface lives in `customer-api.ts`.
+ *
+ * The order endpoints are keyed on an unguessable tracking token rather than an
+ * order id, which is what lets them stay public without exposing every
+ * customer's address to anyone who can count.
  */
 
 export interface ProductQuery {
@@ -179,28 +185,61 @@ export interface CheckoutDetails {
  * speed it is buying. A tier that could be silently omitted is a customer
  * charged for a delivery they did not pick.
  */
-export function placeOrder(
+export async function placeOrder(
   lines: CartLine[],
   details: CheckoutDetails,
   deliveryType: DeliveryType,
 ): Promise<TrackedOrder> {
   const items = toBasketItems(lines);
 
-  return request<TrackedOrder>('/api/store/orders', {
-    method: 'POST',
-    // A header, not a body field, mirroring the server: the checkout body is
-    // the money boundary and carries product ids and quantities only. See
-    // `lib/checkout-attempt.ts` for why the key is derived from the basket
-    // rather than minted per click.
-    headers: {
-      'Idempotency-Key': checkoutAttemptKey(
-        basketSignature(
-          items.map(({ product_id, quantity }) => ({ productId: product_id, quantity })),
-        ),
-      ),
-    },
-    body: { ...details, delivery_type: deliveryType, items },
-  });
+  // A header, not a body field, mirroring the server: the checkout body is the
+  // money boundary and carries product ids and quantities only. See
+  // `lib/checkout-attempt.ts` for why the key is derived from the basket rather
+  // than minted per click.
+  //
+  // Computed once and reused by the retry below, which is the entire point of
+  // an idempotency key: if the first attempt somehow committed before failing,
+  // the retry is handed the same order rather than placing a second one.
+  const idempotencyKey = checkoutAttemptKey(
+    basketSignature(
+      items.map(({ product_id, quantity }) => ({ productId: product_id, quantity })),
+    ),
+  );
+  const body = { ...details, delivery_type: deliveryType, items };
+
+  const send = (token: string) =>
+    request<TrackedOrder>('/api/store/orders', {
+      method: 'POST',
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+        // **The one public endpoint that opts into authentication**, and it is
+        // explicit here rather than routed through `authRequest` so that the
+        // exception is visible at the call site. Signed out, no header is sent
+        // at all and this is exactly the request it has always been.
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body,
+    });
+
+  const token = readToken();
+  if (!token) return send('');
+
+  try {
+    return await send(token);
+  } catch (error) {
+    // A *stale* token makes a public endpoint fail, which is surprising enough
+    // to be worth working around here. Authentication runs before permission,
+    // so a present-but-rejected token 401s the request before checkout is ever
+    // reached — no order placed, on the one path that carries the money.
+    //
+    // The interceptor in `api.ts` has already cleared the session by now, so
+    // this retries as a guest with the same key. The customer loses the link
+    // between the order and their account; they do not lose the order.
+    if (error instanceof ApiError && error.isUnauthenticated) {
+      return send('');
+    }
+    throw error;
+  }
 }
 
 export function trackOrder(token: string, signal?: AbortSignal): Promise<TrackedOrder> {

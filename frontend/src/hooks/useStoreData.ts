@@ -13,6 +13,7 @@ import {
 } from '@/lib/cart-store';
 import { tierFor } from '@/lib/delivery';
 import { getProfileServerSnapshot, getProfileSnapshot, subscribeToProfile } from '@/lib/profile';
+import { getSessionServerSnapshot, getSessionSnapshot, subscribeToSession } from '@/lib/session';
 import {
   getRecentOrdersServerSnapshot,
   getRecentOrdersSnapshot,
@@ -62,6 +63,23 @@ export function useRecentOrders() {
     subscribeToRecentOrders,
     getRecentOrdersSnapshot,
     getRecentOrdersServerSnapshot,
+  );
+}
+
+/**
+ * The signed-in customer, or `null`.
+ *
+ * Returns `null` from the server snapshot, like every store in this file, so a
+ * signed-in customer sees the signed-out header for one frame before hydration
+ * replaces it. That is correct by construction rather than a bug — it is what
+ * guarantees the server-rendered HTML and the first client render agree, and
+ * the cart badge has behaved this way since it was written.
+ */
+export function useSession() {
+  return useSyncExternalStore(
+    subscribeToSession,
+    getSessionSnapshot,
+    getSessionServerSnapshot,
   );
 }
 

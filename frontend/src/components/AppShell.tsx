@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { toast } from 'sonner';
 import {
   ChevronDown,
   Grid2X2,
@@ -24,7 +25,10 @@ import {
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { selectAddress, selectedAddress } from '@/lib/addresses';
 import { cn } from '@/lib/utils';
-import { useAddressBook, useCart, useIsOnline, useStoreConfig } from '@/hooks/useStoreData';
+import { useAddressBook, useCart, useIsOnline, useSession, useStoreConfig } from '@/hooks/useStoreData';
+import { setSessionExpiredHandler } from '@/lib/api';
+import { refreshSession } from '@/lib/customer-api';
+import { readSession, saveSession } from '@/lib/session';
 
 /**
  * The chrome around every page: header, location picker, search, footer and the
@@ -147,12 +151,50 @@ function CartButton() {
   );
 }
 
+// `Account` is not here: it needs its own state, so it renders through
+// `AccountLink` below — the same reason `CartButton` is not a plain nav entry.
 const NAV_LINKS: Array<[label: string, href: string]> = [
   ['Shop', '/products'],
   ['Orders', '/orders'],
   ['Offers', '/offers'],
-  ['Account', '/account'],
 ];
+
+const NAV_LINK_CLASS =
+  'rounded-full px-4 py-2 text-sm font-medium transition-colors hover:bg-secondary hover:text-foreground';
+
+/**
+ * "Sign in" when signed out, the customer's first name when signed in.
+ *
+ * The header is the highest-leverage place to put this — it is on every page,
+ * and it is where someone looks when they wonder whether the shop knows them.
+ *
+ * **Desktop only.** `MobileNav` keeps its plain `/account` tab: the bottom bar
+ * is a fixed five-across grid, and a label that changes width between "Account"
+ * and a name would shift the tabs either side of it under the customer's thumb.
+ * The account *page* handles the signed-out state there instead.
+ *
+ * On the first frame this always renders "Sign in", because `useSession` reads
+ * `null` from its server snapshot. That is deliberate rather than a glitch: it
+ * is what makes the server-rendered HTML and the first client render agree, and
+ * the cart badge has worked this way since it was written.
+ */
+function AccountLink({ pathname }: { pathname: string }) {
+  const session = useSession();
+  const href = session ? '/account' : '/signin';
+  const label = session ? session.name.trim().split(' ')[0] || 'Account' : 'Sign in';
+
+  return (
+    <Link
+      href={href}
+      className={cn(
+        NAV_LINK_CLASS,
+        pathname === href ? 'text-foreground' : 'text-muted-foreground',
+      )}
+    >
+      {label}
+    </Link>
+  );
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -169,6 +211,37 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Validate a stored session once, on mount. The server mints a fresh token on
+  // every `/me`, so this is also what keeps an active customer signed in — and
+  // what discovers a token that has been retired.
+  //
+  // **This is what makes a stale token a non-event rather than a failed
+  // checkout.** Authentication runs before permission, so a rejected token 401s
+  // even a public endpoint: without this, the first a customer would know is
+  // their order not going through. `placeOrder` still retries as a guest, but
+  // that is a second net, not the first.
+  //
+  // Nothing is set into state here — the session store handles its own updates
+  // and `useSession` reads it — so there is no synchronous set-state in an
+  // effect, which is an error in this codebase.
+  useEffect(() => {
+    if (!readSession()) return;
+    // A failure is either a 401, which the interceptor in `api.ts` has already
+    // acted on, or a network blip, which must not sign anyone out.
+    void refreshSession()
+      .then(saveSession)
+      .catch(() => {});
+  }, []);
+
+  // Bounce to sign-in when the server retires a session mid-use. Registered
+  // once, here, rather than threaded through every call site.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      toast.error('You have been signed out.');
+    });
+    return () => setSessionExpiredHandler(undefined);
   }, []);
 
   return (
@@ -215,13 +288,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={href}
                 href={href}
                 className={cn(
-                  'rounded-full px-4 py-2 text-sm font-medium transition-colors hover:bg-secondary hover:text-foreground',
+                  NAV_LINK_CLASS,
                   pathname === href ? 'text-foreground' : 'text-muted-foreground',
                 )}
               >
                 {label}
               </Link>
             ))}
+            <AccountLink pathname={pathname} />
             <div className="ml-2">
               <CartButton />
             </div>

@@ -5,11 +5,23 @@
  * app at a different backend is a one-variable change. Never hardcode a host in
  * a component.
  *
- * There is no authenticated variant here, and there should not be. This package
- * is the customer-facing storefront: every endpoint it touches is public,
- * because a customer has no account. Staff traffic belongs to `admin/`, which
- * has its own client and its own token handling.
+ * **The public calls stay public.** Customers now have accounts, so there are
+ * two variants here: `request()` sends no token and is what the catalogue, the
+ * quote and the tracking page use; `authRequest()` attaches one and is only for
+ * `/api/customer/*` and `/api/auth/customer/*`.
+ *
+ * Explicitly *not* a goal: making `request()` attach a token whenever one
+ * happens to exist. It would move every browsing customer out of the server's
+ * anonymous rate-limit bucket and into their account's for no benefit, let a
+ * bug in the session store break the catalogue for signed-in people only, and
+ * erase the distinction between the calls that need an identity and the many
+ * that do not. Checkout is the single public endpoint that opts in, and it does
+ * so at its own call site in `store-api.ts` where the exception is visible.
+ *
+ * Staff traffic still belongs to `admin/`, which has its own client.
  */
+import { clearSession, readToken } from './session';
+
 const rawApiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
 
 export const API_BASE_URL = rawApiBaseUrl.replace(/\/+$/, '');
@@ -47,9 +59,23 @@ export class ApiError extends Error {
     this.payload = payload;
   }
 
-  /** True when the caller's credentials are missing, expired or rejected. */
-  get isUnauthorized() {
-    return this.status === 401 || this.status === 403;
+  /**
+   * True when the server does not know who the caller is.
+   *
+   * **The only condition that ends a session.** The backend is deliberate about
+   * this split: 401 means "I do not know who you are", which is what should
+   * make a client discard its stored token; 403 means "I know who you are and
+   * you may not do this", which must leave the customer signed in. Conflating
+   * them — as this getter used to — signs someone out of the whole storefront
+   * the first time they touch something they merely lack rights to.
+   */
+  get isUnauthenticated() {
+    return this.status === 401;
+  }
+
+  /** True when the caller is known and still not allowed. Never a sign-out. */
+  get isForbidden() {
+    return this.status === 403;
   }
 
   /** True when the request was fine but the world changed underneath it. */
@@ -190,6 +216,16 @@ async function attemptRequest<T>(
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
+    // **401 only, and never from a bare catch.** A dropped connection, a CORS
+    // misconfiguration and a blocked request all arrive as thrown errors too,
+    // and deleting a valid token because the wifi went is how a customer gets
+    // signed out on a train. This branch fires only when the server itself
+    // said it does not recognise the credential.
+    if (response.status === 401) {
+      clearSession();
+      onSessionExpired?.();
+    }
+
     const detail =
       (payload && typeof payload.detail === 'string' && payload.detail) ||
       `Request failed (${response.status}).`;
@@ -197,4 +233,30 @@ async function attemptRequest<T>(
   }
 
   return payload as T;
+}
+
+/**
+ * What to do when the server retires a session mid-use.
+ *
+ * A module-level hook rather than a callback threaded through every call site:
+ * `AppShell` sets it once on mount, and the interceptor above can then react
+ * from inside a request nobody was watching.
+ */
+let onSessionExpired: (() => void) | undefined;
+
+export function setSessionExpiredHandler(handler: (() => void) | undefined): void {
+  onSessionExpired = handler;
+}
+
+/**
+ * `request()`, with the customer's bearer token attached.
+ *
+ * The token is read from storage on every call rather than captured once, so
+ * signing out in another tab takes effect on this tab's next request.
+ */
+export function authRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const token = readToken();
+  const headers = new Headers(options.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return request<T>(path, { ...options, headers });
 }
