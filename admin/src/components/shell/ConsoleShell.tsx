@@ -7,7 +7,6 @@ import {
   ClipboardList,
   LayoutDashboard,
   Menu,
-  Monitor,
   Moon,
   ScrollText,
   Settings,
@@ -335,9 +334,11 @@ function TopBar({
 function ThemeToggle() {
   const [theme, setTheme] = useTheme();
 
+  // Two, not three. "System" went with the media query it depended on — see
+  // the note in `lib/use-theme.ts`. Light is the default and the console's main
+  // theme; dark is a choice someone makes for a night shift.
   const options = [
     { value: 'light' as const, label: 'Light', icon: Sun },
-    { value: 'system' as const, label: 'System', icon: Monitor },
     { value: 'dark' as const, label: 'Dark', icon: Moon },
   ];
 

@@ -14,9 +14,16 @@
 
    Five decisions follow, and everything after this is one of them:
 
-   1. DARK FIRST, WITH A REAL LIGHT MODE. Long shifts, often at night, often on
-      a phone in a stockroom. The light mode is not an afterthought — the store
-      is bright at midday and a dark screen is unreadable through glare.
+   1. LIGHT BY DEFAULT, WITH A REAL DARK MODE. White is the console's main
+      theme: it is what the shop is, it is what a printed picking list is, and
+      it is what someone opening this on an unfamiliar machine at the counter
+      expects. Dark is a deliberate choice a person makes for a night shift or a
+      dim stockroom, kept behind the toggle in the sidebar rather than sprung on
+      whoever has their laptop set to dark.
+
+      This is why there is no `prefers-color-scheme` rule below. Following the
+      operating system would hand half of all first-time visitors a dark console
+      nobody asked for, which is precisely the default this decision reverses.
 
    2. BORDERS, NOT SHADOWS. A data table needs its columns delimited. Shadow-
       separated cards are for content you browse; hairlines are for content you
@@ -57,7 +64,9 @@
    everything, including browsers that report no colour-scheme preference.
    -------------------------------------------------------------------------- */
 :root {
-  color-scheme: light dark;
+  /* `light` alone, not `light dark`. This declares what the *default* document
+     is, and native controls — scrollbars, date pickers, autofill — read it. */
+  color-scheme: light;
 
   /* Neutrals carry the navy hue of the brand rather than a generic blue-grey,
      so the two apps sit in the same family before a single accent is placed. */
@@ -104,53 +113,15 @@
 }
 
 /* --------------------------------------------------------------------------
-   Palette — dark. Applied when the viewer prefers dark AND has not explicitly
-   chosen light. The `:not([data-theme="light"])` guard is what makes the
-   in-app toggle able to win against the system preference in both directions.
+   Palette — dark. Applied only when someone has actively chosen it, which is
+   the entire difference from how this file used to work: there is no media
+   query, so no amount of operating-system preference turns the console dark on
+   its own.
+
+   Kept in full, and kept to the same measured ratios as the light theme, because
+   an opt-in nobody maintains is worse than no opt-in. A night shift in a
+   stockroom is a real shift.
    -------------------------------------------------------------------------- */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    /* The ground is Deep Navy itself here, which is why the brand amber can be
-       used at full strength: on this surface it measures 9.05:1. */
-    --c-canvas: #070b13;
-    --c-surface: #0f1423;
-    --c-raised: #161d2f;
-    --c-hover: #1e263a;
-    --c-line: #212a3f;
-    --c-line-strong: #333e58;
-
-    /* Against --c-surface: 15.6 / 8.0 / 4.8 — matching the light theme's
-       ratios rather than its lightnesses, so hierarchy reads the same in both. */
-    --c-ink: #e9ecf6;
-    --c-ink-soft: #a3abc0;
-    --c-ink-faint: #7a839a;
-
-    /* On a navy ground the brand amber IS the legible one, so interactive text
-       and the fill converge on a single value here. They diverge only in light
-       mode, where amber cannot be ink. */
-    --c-accent: #f5a623;
-    --c-accent-strong: #ffbf4d;
-    --c-accent-quiet: #2b1f09;
-
-    --c-brand: #f5a623;
-    --c-brand-strong: #ffbf4d;
-    --c-brand-edge: #f5a623;   /* the fill is already 9:1 here; no rim needed */
-    --c-on-brand: #0e1424;
-
-    --c-ok: #6ee7b7;
-    --c-ok-quiet: #0a2b22;
-    --c-warn: #fb923c;
-    --c-warn-quiet: #2e1b0c;
-    --c-danger: #fca5a5;
-    --c-danger-quiet: #2e1618;
-    --c-info: #93c5fd;
-    --c-info-quiet: #10203a;
-
-    --c-shadow: 0 0 0;
-  }
-}
-
-/* The explicit choice, which must beat the media query in both directions. */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --c-canvas: #070b13;
@@ -180,6 +151,9 @@
   --c-shadow: 0 0 0;
 }
 
+/* Light is already the default, so this stamp only ever restates it. It stays
+   because `use-theme.ts` may write it, and a stamp the code can produce which
+   the stylesheet does not answer is a bug waiting for someone to add a rule. */
 :root[data-theme="light"] {
   color-scheme: light;
 }

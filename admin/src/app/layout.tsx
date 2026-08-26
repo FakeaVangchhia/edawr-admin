@@ -40,32 +40,35 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  // Both themes are declared, so the browser paints the right colour behind
-  // the page before React has rendered anything — without this the first frame
-  // of the dark console is a white flash.
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f5f6fa' },
-    { media: '(prefers-color-scheme: dark)', color: '#070b13' },
-  ],
+  // One value, because the console has one default and it is white. This is
+  // the colour the browser paints before React has rendered anything, so it
+  // has to match what the stylesheet will settle on — and the stylesheet no
+  // longer consults the operating system. Keying this on prefers-color-scheme,
+  // as it used to, would now paint a dark frame and then reveal a light app.
+  //
+  // The cost lands on the minority who chose dark: they get a brief white frame
+  // before the bootstrap below stamps the attribute. A meta tag cannot read
+  // localStorage, so that is the trade, and it now falls on the smaller group.
+  themeColor: '#f5f6fa',
 };
 
 /**
  * Read the stored theme before first paint.
  *
  * This has to be inline and synchronous: anything deferred runs after the
- * browser has already painted, and the operator sees a white flash before the
- * dark theme applies. It is nonce-carrying, which is why it satisfies the
- * strict CSP in `proxy.ts`, and it is the only inline script in the app.
+ * browser has already painted, and someone who chose dark sees a white flash
+ * before it applies. It is nonce-carrying, which is why it satisfies the strict
+ * CSP in `proxy.ts`, and it is the only inline script in the app.
  *
- * It writes `data-theme` only when a choice was stored. With no attribute the
- * CSS falls through to `prefers-color-scheme`, which is the right default.
+ * It writes `data-theme` only for a stored *dark* choice. No attribute means
+ * light, which is the console's default — so for everyone who has never opened
+ * the toggle this script does nothing at all, which is the correct amount.
  */
 const THEME_BOOTSTRAP = `
 (function () {
   try {
-    var stored = localStorage.getItem('edawr-console-theme');
-    if (stored === 'dark' || stored === 'light') {
-      document.documentElement.setAttribute('data-theme', stored);
+    if (localStorage.getItem('edawr-console-theme') === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
     }
   } catch (e) {}
 })();
