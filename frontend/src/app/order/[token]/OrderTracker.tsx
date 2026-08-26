@@ -35,6 +35,8 @@ import {
 import { isLive, isStopped } from '@/lib/order-status';
 import { forgetOrder } from '@/lib/recent-orders';
 import { cancelOrder, trackOrder } from '@/lib/store-api';
+import { claimOrder } from '@/lib/customer-api';
+import { useSession } from '@/hooks/useStoreData';
 import { ImageFallback } from '@/components/ProductCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -49,10 +51,15 @@ import type { OrderStatus, TrackedOrder } from '@/types';
  * at Ready or nobody at all. A progress bar that moves on a clock rather than
  * on the order is a lie the customer discovers at the door.
  *
- * The order is authorised by possession of the tracking token in the URL —
- * there is no account to check it against. That is why a 404 forgets the token
- * locally: it is either wrong or the order is gone, and continuing to advertise
- * it on /orders helps nobody.
+ * The order is authorised by possession of the tracking token in the URL, and
+ * still is now that accounts exist: this page is public, because the customer
+ * who placed the order may well not have one. That is why a 404 forgets the
+ * token locally — it is either wrong or the order is gone, and continuing to
+ * advertise it on /orders helps nobody.
+ *
+ * A signed-in customer is offered the chance to attach this order to their
+ * account. It needs no verified number precisely because the token is already
+ * the credential: claiming grants nothing that reading this page did not.
  */
 
 const POLL_MS = 10_000;
@@ -100,6 +107,9 @@ const STAMPS: Partial<Record<OrderStatus, keyof TrackedOrder>> = {
 export function OrderTracker({ token }: { token: string }) {
   const [state, setState] = useState<{ order: TrackedOrder | null; error: string } | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const session = useSession();
+  const [claimed, setClaimed] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
   /**
    * Bumped to re-run the fetch. Refreshing by changing state that the effect
    * depends on — rather than by calling a fetch function from inside it —
@@ -186,6 +196,35 @@ export function OrderTracker({ token }: { token: string }) {
     }
   };
 
+  /**
+   * Attach this order to the signed-in account.
+   *
+   * Offered here because this is the moment the customer is holding the
+   * proof: the tracking token is in the address bar, and possession of it is
+   * already the whole credential for this page. The server checks nothing
+   * else, and does not need to — it grants no access that reading this page
+   * did not already grant.
+   *
+   * The button only appears when there is something to do: signed in, and
+   * this order not already linked to somebody.
+   */
+  const claim = async () => {
+    if (isClaiming) return;
+    setIsClaiming(true);
+    try {
+      const updated = await claimOrder(token);
+      setState({ order: updated, error: '' });
+      setClaimed(true);
+      toast.success('Saved to your account');
+    } catch (caught: unknown) {
+      toast.error(
+        caught instanceof Error ? caught.message : 'Could not save that to your account.',
+      );
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
   return (
     <div className="container-page py-8 lg:py-12">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -195,6 +234,35 @@ export function OrderTracker({ token }: { token: string }) {
           <p className="mt-1 text-sm text-muted-foreground">
             Placed {formatDateTime(order.created_at)}
           </p>
+
+          {/*
+            The account offer, at the moment it is most likely to be taken: the
+            order has gone through and the customer is watching it come.
+            Research on this is consistent — right after a good outcome beats
+            anywhere in the checkout flow.
+          */}
+          {!session ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              <Link
+                href={`/signup?next=${encodeURIComponent(`/order/${token}`)}`}
+                className="font-medium text-foreground underline underline-offset-4"
+              >
+                Create an account
+              </Link>{' '}
+              to keep this order when you change phone.
+            </p>
+          ) : claimed ? (
+            <p className="mt-3 text-sm text-success">Saved to your account.</p>
+          ) : (
+            <button
+              type="button"
+              onClick={claim}
+              disabled={isClaiming}
+              className="mt-3 text-sm font-medium underline underline-offset-4 disabled:opacity-60"
+            >
+              {isClaiming ? 'Saving…' : 'Save this order to my account'}
+            </button>
+          )}
         </div>
 
         {/* The one thing on this page that changes on its own.

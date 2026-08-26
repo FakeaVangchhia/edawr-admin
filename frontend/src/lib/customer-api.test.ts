@@ -33,7 +33,10 @@ const SESSION = {
 
 const LINES: CartLine[] = [
   {
-    product: { id: 3, name: 'Milk', price: 62, image: null } as CartLine['product'],
+    // Only `id` and `quantity` reach the wire, so the rest of the product is
+    // not worth constructing; `unknown` first because the partial shape does
+    // not overlap StoreProduct enough for a direct assertion.
+    product: { id: 3, name: 'Milk', price: 62 } as unknown as CartLine['product'],
     quantity: 2,
   },
 ];

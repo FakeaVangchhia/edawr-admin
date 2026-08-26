@@ -9,20 +9,28 @@ import { formatDateTime, formatMoneyExact } from '@/lib/format';
 import { isLive, isStopped } from '@/lib/order-status';
 import { buildReorder } from '@/lib/reorder';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useRecentOrders } from '@/hooks/useStoreData';
+import { useRecentOrders, useSession } from '@/hooks/useStoreData';
 import { cn } from '@/lib/utils';
 import type { TrackedOrder } from '@/types';
 import { ApiError } from '@/lib/api';
 import { mapWithLimit } from '@/lib/concurrency';
 import { trackOrder } from '@/lib/store-api';
+import { fetchMyOrders } from '@/lib/customer-api';
+import { mergeOrderHistory } from '@/lib/order-history';
 
 /**
  * The customer's order history.
  *
- * There is no account, so "history" is the set of tracking tokens this browser
- * saved at checkout — see `lib/recent-orders.ts`. Each one is re-fetched for
- * its live status, because a remembered order that still says "Placed" three
- * hours later is worse than no status at all.
+ * Two sources, merged into one list by `lib/order-history.ts`. A signed-in
+ * customer's orders come from the server in one request; anything this browser
+ * remembers and the server did not return — a guest order, or one placed here
+ * while signed out — is fetched per token from `lib/recent-orders.ts` and kept
+ * alongside. Merged rather than switched between, because switching would make
+ * orders vanish the moment someone signed in, which is the opposite of what an
+ * account is for.
+ *
+ * Local-only rows are re-fetched for their live status, because a remembered
+ * order that still says "Placed" three hours later is worse than no status.
  *
  * Orders whose tokens 404 are dropped by `OrderTracker` when they are opened;
  * here they render as gone rather than vanishing mid-list.
@@ -42,6 +50,7 @@ const FETCH_CONCURRENCY = 3;
 
 export function OrdersPage() {
   const remembered = useRecentOrders();
+  const session = useSession();
   const [reordering, setReordering] = useState<string | null>(null);
 
   /**
@@ -50,23 +59,42 @@ export function OrdersPage() {
    * It doubles as the cache key for the fetch below: `remembered` is a fresh
    * array reference on every render, so depending on it directly would re-fetch
    * forever, and tagging the result with it is what makes the loading flag
-   * derivable instead of stored.
+   * derivable instead of stored. The account id joins it for the same reason —
+   * signing in or out has to re-run this, and the id is what changed.
    */
   const tokens = remembered.map((entry) => entry.token).join(',');
+  const queryKey = `${session?.id ?? 'guest'}:${tokens}`;
   const [fetched, setFetched] = useState<{
-    tokens: string;
+    key: string;
+    server: TrackedOrder[];
     orders: Record<string, OrderState>;
   } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
 
-    // An empty list still resolves — the "no orders" state is a result, not a
-    // pending one, and returning early here would leave it loading forever.
-    mapWithLimit(
-      tokens ? tokens.split(',') : [],
-      FETCH_CONCURRENCY,
-      (token) =>
+    // One request for the whole account, when there is one. A signed-in
+    // customer's history usually arrives entirely from here, and the per-token
+    // requests below then have nothing left to do.
+    //
+    // A failure is not fatal: the remembered tokens are still fetchable, so an
+    // account whose orders cannot be loaded degrades to what a guest would
+    // see rather than to an error page.
+    const account = session
+      ? fetchMyOrders(controller.signal).catch(() => [] as TrackedOrder[])
+      : Promise.resolve([] as TrackedOrder[]);
+
+    account.then((server) => {
+      if (controller.signal.aborted) return;
+
+      const covered = new Set(server.map((order) => order.tracking_token));
+      const outstanding = (tokens ? tokens.split(',') : []).filter(
+        (token) => !covered.has(token),
+      );
+
+      // An empty list still resolves — the "no orders" state is a result, not a
+      // pending one, and returning early here would leave it loading forever.
+      return mapWithLimit(outstanding, FETCH_CONCURRENCY, (token) =>
         trackOrder(token, controller.signal)
           .then((order) => [token, order] as const)
           .catch((error: unknown) => {
@@ -77,18 +105,28 @@ export function OrdersPage() {
             const gone = error instanceof ApiError && error.status === 404;
             return [token, gone ? 'gone' : 'unreachable'] as const;
           }),
-    ).then((entries) => {
-      if (controller.signal.aborted) return;
-      setFetched({ tokens, orders: Object.fromEntries(entries) });
+      ).then((entries) => {
+        if (controller.signal.aborted) return;
+        setFetched({ key: queryKey, server, orders: Object.fromEntries(entries) });
+      });
     });
 
     return () => controller.abort();
-  }, [tokens]);
+    // `tokens` and `session?.id` are both inside `queryKey`; listing it alone
+    // keeps the effect keyed on exactly the string the result is tagged with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey]);
 
-  // Derived, not stored: results belong to the token list that produced them.
-  const current = fetched?.tokens === tokens ? fetched : null;
+  // Derived, not stored: results belong to the query that produced them.
+  const current = fetched?.key === queryKey ? fetched : null;
   const orders = current?.orders ?? {};
   const loaded = current !== null;
+
+  // One row per tracking token, server copies preferred. A local-only row is
+  // kept rather than dropped: it is either a guest order from before the
+  // account existed or one placed on this device while signed out, and losing
+  // it would be losing the only record of it.
+  const history = mergeOrderHistory(current?.server ?? [], remembered);
 
   const reorder = async (token: string) => {
     if (reordering) return;
@@ -126,7 +164,7 @@ export function OrdersPage() {
     );
   }
 
-  if (remembered.length === 0) {
+  if (history.length === 0) {
     return (
       <div className="container-page py-20 text-center lg:py-28">
         <span className="mx-auto grid size-16 place-items-center rounded-3xl bg-secondary">
@@ -134,8 +172,9 @@ export function OrdersPage() {
         </span>
         <h1 className="mt-6 text-2xl font-semibold">No orders yet</h1>
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-          Orders you place are remembered on this device so you can track them. They are not tied
-          to an account, so clearing your browser data clears this list.
+          {session
+            ? 'Orders you place while signed in are saved to your account, so they follow you to any device.'
+            : 'Orders you place are remembered on this device so you can track them. Sign in and they are saved to your account instead.'}
         </p>
         <Link
           href="/products"
@@ -156,8 +195,11 @@ export function OrdersPage() {
       </p>
 
       <ul className="mt-10 space-y-4">
-        {remembered.map((entry) => {
-          const state = orders[entry.token];
+        {history.map((entry) => {
+          // A row the server already returned needs no per-token state:
+          // it arrived complete. Only local-only rows have a `gone` or
+          // `unreachable` outcome to report.
+          const state = entry.order ?? orders[entry.token];
           // Narrowed once, here, so every branch below reads an order or reads
           // nothing — rather than each one re-checking which of the three
           // states it is looking at.
@@ -174,14 +216,14 @@ export function OrdersPage() {
                   <p className="num text-lg font-semibold">#{entry.orderId}</p>
                   <p className="num mt-0.5 text-sm text-muted-foreground">
                     {formatDateTime(order?.created_at ?? entry.placedAt)} ·{' '}
-                    {order?.items.length ?? entry.itemCount}{' '}
-                    {(order?.items.length ?? entry.itemCount) === 1 ? 'item' : 'items'}
+                    {order?.items.length ?? entry.remembered?.itemCount ?? 0}{' '}
+                    {(order?.items.length ?? entry.remembered?.itemCount ?? 0) === 1 ? 'item' : 'items'}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <span className="num text-lg font-semibold">
-                    {formatMoneyExact(order?.grand_total ?? entry.total)}
+                    {formatMoneyExact(order?.grand_total ?? entry.remembered?.total ?? 0)}
                   </span>
                   {order ? (
                     <span

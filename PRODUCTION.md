@@ -820,7 +820,7 @@ money) and an alert on 5xx rate.
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- **storefront** — `npm ci`, lint, `tsc --noEmit`, 201 tests, production build,
+- **storefront** — `npm ci`, lint, `tsc --noEmit`, 267 tests, production build,
   and a check that
   **no route prerenders**. That last one is not ceremony: a layout that stops
   being dynamic passes every other check and ships a storefront that paints and
@@ -831,7 +831,7 @@ money) and an alert on 5xx rate.
   until recently, which is worth knowing given it is also the package where
   a mistake is hardest to correct — no OTA channel means a store submission.
 - **backend** — disabled in this repo (`backend/` is gitignored here) and live in
-  the `edawr-backend` repository, where the identical job runs 446 tests against
+  the `edawr-backend` repository, where the identical job runs 538 tests against
   a **Postgres service container**, checks migrations are committed
   (`makemigrations --check`), and runs `check --deploy` with production settings.
 
@@ -844,8 +844,8 @@ Deploys stay manual. At this scale that is fine; untested merges are not.
 ## Test suites
 
 ```bash
-cd backend  && uv run manage.py test    # 446 tests, ~10s against Postgres
-cd frontend && npm test                 # 201 tests, ~5s
+cd backend  && uv run manage.py test    # 538 tests, ~18s against Postgres
+cd frontend && npm test                 # 267 tests, ~9s
 cd admin    && npm test                 # 66 tests, ~4s
 cd mobile   && npm run typecheck        # no test runner — see Part 4
 ```

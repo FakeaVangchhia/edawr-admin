@@ -37,7 +37,7 @@ uv run manage.py migrate                 # create/update the schema
 uv run manage.py seed                    # load sample data (deletes all rows)
 uv run manage.py runserver 8000          # use 0.0.0.0:8000 for the phone
 uv run manage.py makemigrations          # after editing api/models.py
-uv run manage.py test                    # 446 tests, ~10s on Postgres
+uv run manage.py test                    # 538 tests, ~18s on Postgres
 uv run manage.py check --deploy          # before shipping
 ```
 
@@ -179,6 +179,35 @@ on a request whose work already committed.
 that changes hands at shift change must belong to whoever signed in last, or one
 order buzzes two riders. Notifications carry the address and the amount only —
 they render on a lock screen, so the customer's name and number stay in the app.
+
+### A customer account is optional, and an unverified one sees less
+`Customer` is the third identity table (`AdminUser`, `User`, `Customer`), keyed
+on the phone number `normalise_phone` already produces at checkout. **Guest
+checkout is unchanged and is still the main path** — `Order.customer` is
+nullable, and no token means no account. The customer comes from the token and
+never from the body, exactly as the rider does.
+
+`phone_verified_at` is the seam the whole design hangs on. Setting a password
+proves someone *knows* a number, not that they hold the SIM, so
+`api/views/customer.py::visible_orders` shows an unverified account only the
+orders linked to it. A verified one additionally sees unclaimed orders carrying
+its number. Nothing writes the column yet — that needs an SMS provider, and DLT
+registration — so keep the eventual OTP challenge **stateless** (a
+`TimestampSigner` token or a cache key), or the "no migration needed" promise on
+the model field stops being true.
+
+The escape hatch is the tracking token: `POST /api/customer/orders/claim`, and
+`claim_token` on signup, link one order the caller can prove they hold.
+**Possession of the token is the evidence, not the phone number** — it is
+already the whole credential for the public tracking page, so claiming grants
+nothing new and needs no verification.
+
+**Adding a fourth identity means adding a fourth throttle class.** DRF's
+`AnonRateThrottle` returns no key once a request is authenticated, and each
+per-account throttle returns none for a caller it does not recognise, so the
+default class list covers everyone only while the two sets match. Getting it
+wrong is silent: nothing raises, and the new caller is simply unmetered
+everywhere. `api/tests/test_throttling.py` is the regression guard.
 
 ### Auth
 - `api/authentication.py` answers *who is this?* and never rejects.

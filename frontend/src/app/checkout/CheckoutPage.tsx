@@ -35,7 +35,10 @@ import {
 } from '@/components/BasketSummary';
 import { ImageFallback } from '@/components/ProductCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAddressBook, useCart, useProfile, useStoreConfig } from '@/hooks/useStoreData';
+import { useAddressBook, useCart, useProfile, useSession, useStoreConfig } from '@/hooks/useStoreData';
+import { signUp } from '@/lib/customer-api';
+import { PASSWORD_HINT, passwordProblem } from '@/lib/password';
+import { saveSession } from '@/lib/session';
 import { useDraft } from '@/hooks/useDraft';
 import { useQuote } from '@/hooks/useQuote';
 import { cn } from '@/lib/utils';
@@ -60,6 +63,20 @@ interface FieldErrors {
   name?: string;
   phone?: string;
   address?: string;
+  signupPassword?: string;
+}
+
+/**
+ * `+919812345678` as `9812345678`, for a field a customer types by hand.
+ *
+ * The account stores the normalised form; the server normalises whatever comes
+ * back, so showing the local ten digits costs nothing and reads like a phone
+ * number rather than like a database row.
+ */
+function localPhone(stored: string | undefined): string {
+  if (!stored) return '';
+  const digits = stored.replace(/\D/g, '');
+  return digits.length > 10 ? digits.slice(-10) : digits;
 }
 
 export function CheckoutPage() {
@@ -69,6 +86,7 @@ export function CheckoutPage() {
   const config = useStoreConfig();
   const book = useAddressBook();
   const profile = useProfile();
+  const session = useSession();
 
   // The tier is carried from the cart so the customer is not silently moved to
   // a different speed — and re-validated, because a URL is user input.
@@ -86,8 +104,18 @@ export function CheckoutPage() {
   const savedLandmark = saved?.landmark ?? '';
 
   const [deliveryType, setDeliveryType] = useState<DeliveryType>(initialTier);
-  const [name, setName] = useDraft(profile.name);
-  const [phone, setPhone] = useDraft(profile.phone);
+  // The account first, the device-local profile second. `useDraft` is built
+  // for exactly this — a source that arrives a tick after the first render —
+  // so a signed-in customer sees their own details rather than two blank
+  // boxes followed by a flash of them.
+  const [name, setName] = useDraft(session?.name || profile.name);
+  const [phone, setPhone] = useDraft(localPhone(session?.phone) || profile.phone);
+
+  // The optional account offer, shown only to a guest. Unchecked by default:
+  // an untouched box is a guest order with zero extra keystrokes, which is
+  // the whole point of leaving checkout open to people without accounts.
+  const [wantsAccount, setWantsAccount] = useState(false);
+  const [signupPassword, setSignupPassword] = useState('');
   const [address, setAddress, resetAddress] = useDraft(savedAddress);
   const [landmark, setLandmark, resetLandmark] = useDraft(savedLandmark);
   const [notes, setNotes] = useState('');
@@ -168,6 +196,12 @@ export function CheckoutPage() {
     if (!isValidAddress(address)) {
       next.address = 'Enter a full address a rider could actually find.';
     }
+    // Only when the box is ticked. An untouched offer must never be able to
+    // block an order — that is the difference between an option and a wall.
+    if (wantsAccount && !session) {
+      const problem = passwordProblem(signupPassword, phone);
+      if (problem) next.signupPassword = problem;
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -230,6 +264,36 @@ export function CheckoutPage() {
         itemCount: order.items.length,
       });
       saveProfile({ name: name.trim(), phone: phone.trim() });
+
+      // **The account is created after the order, and cannot fail it.** By this
+      // point the order is committed, the token is remembered and the customer
+      // has bought their groceries. A sign-up that threw here — a number
+      // already taken, a password the server refuses, a dropped connection —
+      // must produce a message and nothing else.
+      //
+      // `claimToken` is what stops the new account opening on an empty list:
+      // the order predates it, and the phone number alone is not evidence of
+      // anything until it is verified. Possession of the tracking token is.
+      if (wantsAccount && !session) {
+        try {
+          saveSession(
+            await signUp({
+              phone: phone.trim(),
+              password: signupPassword,
+              name: name.trim(),
+              claimToken: order.tracking_token,
+            }),
+          );
+          toast.success('Account created');
+        } catch (signupError) {
+          toast.error('Your order is placed', {
+            description:
+              signupError instanceof ApiError && signupError.isConflict
+                ? 'That number already has an account — sign in to see this order in it.'
+                : 'We could not create your account. Try again from the Account page.',
+          });
+        }
+      }
       // The idempotency key has been redeemed. Leaving it in storage means the
       // next checkout's first act is reading a spent one, and a used key
       // lingering in a customer's browser is exactly what confuses whoever is
@@ -433,6 +497,39 @@ export function CheckoutPage() {
               />
             </div>
 
+            {!session && (
+              <div className="mt-6 rounded-3xl bg-surface p-5">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={wantsAccount}
+                    onChange={(event) => setWantsAccount(event.target.checked)}
+                    className="mt-0.5 size-4 shrink-0 rounded border-border accent-[var(--color-primary)]"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">Save my details for next time</span>
+                    <span className="mt-0.5 block text-muted-foreground">
+                      Create an account with this number, and your orders follow you to any device.
+                    </span>
+                  </span>
+                </label>
+
+                {wantsAccount && (
+                  <div className="mt-4">
+                    <Field
+                      label="Choose a password"
+                      value={signupPassword}
+                      onChange={setSignupPassword}
+                      type="password"
+                      autoComplete="new-password"
+                      error={errors.signupPassword}
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">{PASSWORD_HINT}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {book.entries.length === 0 && isValidAddress(address) && (
               <button
                 type="button"
@@ -613,6 +710,7 @@ function Field({
   error,
   inputMode,
   autoComplete,
+  type = 'text',
 }: {
   label: string;
   value: string;
@@ -621,6 +719,7 @@ function Field({
   error?: string;
   inputMode?: 'tel' | 'text';
   autoComplete?: string;
+  type?: 'text' | 'password';
 }) {
   return (
     <label className="block">
@@ -628,6 +727,7 @@ function Field({
         {label}
       </span>
       <input
+        type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
