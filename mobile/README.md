@@ -148,15 +148,44 @@ root README if you want to regenerate or replace them.
   it half-configured is worse than not having it.
 - **No crash reporting.** Errors surface as alerts to the rider and nowhere
   else. Sentry's Expo SDK is the usual choice.
-- **No push notifications.** A rider must have the app open to see a new
-  offer; the feed polls every 15 seconds.
+- **Push notifications need an EAS project id.** The code is in place (see
+  below), but `getExpoPushTokenAsync` cannot issue a token until `eas init` has
+  written `extra.eas.projectId` into `app.json`. Until then `src/push.ts` logs
+  why and the app runs normally on its poll.
+- **No notification icon.** Android renders one as a white silhouette, so it
+  needs a purpose-made 96x96 transparent PNG; without one it falls back to the
+  app icon, which comes out as a white blob. `app.json` says so at the
+  `expo-notifications` plugin entry.
 - **No background location**, so the customer's tracking page shows order
   status rather than a moving pin.
 
-## Real-time updates
+## Staying up to date
 
-Optional and off by default. `src/hooks/useSocket.ts` connects only when
-`EXPO_PUBLIC_SOCKET_URL` is set; there is no socket.io server in this repo, and
-pointing it at the Django backend would retry a handshake forever. The
-dashboard polls over REST regardless, which is the supported configuration
-rather than a degraded one.
+Two mechanisms, and only one of them carries data.
+
+**The poll is the source of truth.** `DeliveryScreen` refetches the dashboard
+every 15 seconds while the app is in the foreground, backing off to a minute
+while the server is unreachable and refreshing immediately on resume. There is
+no socket server in this repo — the `socket.io-client` dependency and the
+`useSocket` hook that pretended otherwise are gone; they shipped in every APK
+and connected to nothing.
+
+**Push notifications are a prompt to look.** `src/push.ts` registers the
+handset with the backend, which buzzes it when an order is assigned to this
+rider or lands in the feed for anyone to take (`backend/api/push.py`). The
+notification carries the address and the amount to collect and nothing else —
+it renders on a lock screen, so the customer's name and phone number stay
+inside the app. Receiving one triggers an immediate refresh, because the banner
+would otherwise describe an order the screen behind it does not yet show.
+
+Everything works with notifications denied, undelivered, or switched off
+server-side; the rider is then 15 seconds behind rather than stuck. Three
+things have to line up before any of it fires:
+
+1. `eas init`, so the build has a project id to mint a push token against.
+2. `eas credentials`, so Expo can reach FCM (Android) and APNs (iOS).
+3. `PUSH_ENABLED=true` on the backend.
+
+The rider is asked for permission once, on their first sign-in. A refusal is
+recorded by the OS and never re-prompted, which is deliberate: a rider who does
+not want their phone buzzing has said so.

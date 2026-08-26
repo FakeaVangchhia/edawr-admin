@@ -30,6 +30,7 @@ import {
   setAvailability,
   setOrderStatus,
 } from '../api';
+import { addOrderNotificationListener } from '../push';
 import { DeliveryDashboard, Order, RiderSession, RiderStatus } from '../types';
 
 interface DeliveryScreenProps {
@@ -247,6 +248,26 @@ export default function DeliveryScreen({ session, onLogout }: DeliveryScreenProp
       subscription.remove();
     };
   }, [refreshDashboard]);
+
+  /**
+   * Refresh the moment a notification about an order arrives or is tapped.
+   *
+   * The notification and the data are two separate deliveries: Expo wakes the
+   * phone, but the order itself only exists in this app once the dashboard has
+   * been fetched. Without this the banner says "New delivery assigned" over a
+   * screen that still shows nothing, for up to fifteen seconds — which reads as
+   * the app being broken at the exact moment the rider is being asked to hurry.
+   *
+   * It is additive, not a replacement: the poll in the effect above is still
+   * the source of truth, and everything here works with notifications denied,
+   * undelivered or switched off server-side.
+   */
+  useEffect(
+    () => addOrderNotificationListener(() => {
+      refreshDashboard();
+    }),
+    [refreshDashboard],
+  );
 
   const onPullToRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -160,6 +160,26 @@ not revenue).
 `paid_at` rather than `created_at`, because it answers "what is in the till
 tonight" and an order placed at 23:50 and delivered at 00:05 is tomorrow's cash.
 
+### A notification is a prompt, never the delivery mechanism
+`api/push.py` wakes a rider's phone when an order is assigned to them or lands
+in the pull feed; `mobile/src/push.ts` registers the handset. The rider app's
+fifteen-second poll remains the source of truth — every path here is
+best-effort, off unless `PUSH_ENABLED`, and silent on every failure, because it
+runs inside the transaction that assigns an order and must never be able to fail
+it. That is the same contract `api/audit.py` has, for the same reason.
+
+Two consequences worth knowing before editing it. **The send is deferred to
+`transaction.on_commit` and then to a daemon thread**: never buzz a phone about
+an assignment a rollback undid, and never hold `select_for_update` locks across
+a call to a third party. **The commit hook has its own `try`** — hooks run after
+the caller returned, inline on the connection, so anything raised there is a 500
+on a request whose work already committed.
+
+`RiderDevice.expo_token` is unique across the table, not per rider: a handset
+that changes hands at shift change must belong to whoever signed in last, or one
+order buzzes two riders. Notifications carry the address and the amount only —
+they render on a lock screen, so the customer's name and number stay in the app.
+
 ### Auth
 - `api/authentication.py` answers *who is this?* and never rejects.
 - `api/permissions.py` answers *may they?* and rejects.

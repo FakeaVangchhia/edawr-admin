@@ -47,11 +47,20 @@
           "backgroundColor": "#2e1065"
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-notifications",
+        {
+          "//": "No `icon` here on purpose. Android renders a notification icon as a white silhouette of whatever it is given, so a coloured app icon comes out as an unrecognisable white blob; it needs a purpose-made 96x96 transparent PNG, which this project does not have yet. Omitting it falls back to the app icon, which is no worse and is honest about the gap. `color` is the accent Android tints the icon and the app name with.",
+          "color": "#4169E1",
+          "defaultChannel": "orders"
+        }
+      ]
     ],
     "extra": {
       "//": "apiUrl is the backend a RELEASE build talks to. Development ignores it and auto-detects the dev machine's LAN IP instead (see src/config.ts). Leaving it null makes a release build fail loudly at startup rather than silently calling localhost \u2014 set it, or pass EXPO_PUBLIC_API_URL at build time.",
       "apiUrl": null,
+      "//push": "Push notifications need an EAS project id, which `eas init` writes here as extra.eas.projectId. Until it exists src/push.ts logs why it cannot register and the app runs normally on its fifteen-second poll — a build with no project id is a working rider app that cannot be buzzed, which is a gap and not a failure. The backend half also has to be switched on (PUSH_ENABLED=true) and the FCM/APNs credentials uploaded with `eas credentials`; see backend/api/push.py.",
       "//cleartext": "There is deliberately no android.usesCleartextTraffic here, so cleartext stays OFF (the Android 9+ default). src/config.ts refuses an http:// API URL in a release build for the same reason: the rider PIN and bearer token would otherwise cross the network in plaintext. An on-premises deployment that genuinely needs plaintext must set usesCleartextTraffic AND relax the check in config.ts - both, or the build fails at startup instead of at the first request. (This key lives under extra because Expo validates the android block against a schema and rejects unknown properties.)"
     }
   }

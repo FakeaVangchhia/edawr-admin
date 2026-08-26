@@ -4,6 +4,10 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { UnauthorizedError, fetchRiderSession, riderLogout } from './src/api';
 import { configError } from './src/config';
 import { ConfigErrorScreen, ErrorBoundary } from './src/ErrorBoundary';
+import {
+  registerForPushNotifications,
+  unregisterForPushNotifications,
+} from './src/push';
 import { reportRiderCrash } from './src/report-error';
 import DeliveryScreen from './src/screens/DeliveryScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -71,6 +75,11 @@ function RiderApp() {
             // rider who opens the app regularly is never logged out mid-shift.
             // Inside the guard: writing after unmount is a write nothing reads.
             await saveToken(restored.access_token);
+            // Every launch, not just the first sign-in: Expo rotates a push
+            // token on reinstall and on restore to a new phone without telling
+            // anyone, so a registration made once quietly stops working. It
+            // never throws and never blocks — see src/push.ts.
+            registerForPushNotifications(restored.access_token);
           }
         } catch (caught) {
           if (caught instanceof UnauthorizedError) {
@@ -94,6 +103,10 @@ function RiderApp() {
   const handleLogin = useCallback(async (next: RiderSession) => {
     setSession(next);
     await saveToken(next.access_token);
+    // Not awaited: the permission prompt is the rider's to answer in their own
+    // time, and the delivery feed should be on screen behind it rather than
+    // waiting on it.
+    registerForPushNotifications(next.access_token);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -101,7 +114,15 @@ function RiderApp() {
     // this way because the call needs the token, and safe because `riderLogout`
     // swallows its own failures: a rider signing out in a basement must still
     // be signed out of the phone in front of them.
-    if (session) await riderLogout(session.access_token);
+    // Unregister the handset *before* the token is retired, and before the
+    // local copy is cleared — both calls need it. Ordering matters more here
+    // than it looks: Expo delivers to a handset, not to a session, so a token
+    // left registered keeps buzzing this phone for orders that now belong to
+    // whoever signs in next. Like `riderLogout`, it swallows its own failure.
+    if (session) {
+      await unregisterForPushNotifications(session.access_token);
+      await riderLogout(session.access_token);
+    }
     setSession(null);
     await clearToken();
   }, [session]);

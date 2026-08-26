@@ -555,7 +555,8 @@ role needs `CREATEDB`.
 
 ## Every environment variable
 
-Read by `config/settings.py`. Everything has a working development default; the
+Read by `config/settings.py`, except the web-server block at the end, which is
+read by `config/gunicorn.py`. Everything has a working development default; the
 ones marked **required** are refused at startup outside development by
 `check_production_safety()` in `api/apps.py`.
 
@@ -602,6 +603,16 @@ ones marked **required** are refused at startup outside development by
 | `STORE_TIMEZONE` | `Asia/Kolkata` | What analytics group by. Rows stay UTC |
 | `LOG_LEVEL` | `INFO` | JSON lines outside development |
 | `SEED_ADMIN_EMAIL` / `_PASSWORD` / `SEED_RIDER_PIN` | published defaults | `manage.py seed` only — never production |
+| `PORT` | `8080` | Injected by Cloud Run; the container must listen on it |
+| `WEB_CONCURRENCY` | `1` | Worker processes. One per CPU |
+| `GUNICORN_THREADS` | `8` | **× `WEB_CONCURRENCY` is also this instance's DB connection ceiling** |
+| `GUNICORN_TIMEOUT` | `0` | A worker liveness check, not a request deadline. See below |
+| `GUNICORN_GRACEFUL_TIMEOUT` | `8` | Keep under the platform's shutdown grace (Cloud Run: 10s) |
+| `GUNICORN_KEEPALIVE` | `5` | Raise above the idle timeout of any proxy in front |
+| `GUNICORN_PRELOAD` | `true` | Fork after import, so a config error fails once rather than per worker |
+| `GUNICORN_MAX_REQUESTS` / `_JITTER` | `0` / `0` | Worker recycling, off. Turn on if RSS climbs |
+| `GUNICORN_LOG_LEVEL` | `info` | Gunicorn's own logs, formatted like the app's |
+| `GUNICORN_ACCESS_LOG` | `false` | Cloud Run's front end already logs every request |
 
 **What is deliberately *not* here:** opening hours, the "pause new orders" kill
 switch, the delivery radius and the store's own coordinates. Those live in the
@@ -703,6 +714,37 @@ deliberate exception to the advice in `config/urls.py`, not an oversight.
 
 Upgrade path if image traffic ever dominates: `django-storages` plus a CDN
 origin added to the CSP.
+
+## WSGI or ASGI, and why the answer here is WSGI
+
+`manage.py runserver` warns you to use a production WSGI or ASGI server. The
+container already does: `config/gunicorn.py`, which the Dockerfile's CMD points
+at. The warning is about the development server, and it appears wherever you run
+`runserver` — locally, that is the correct thing to be running.
+
+The choice between the two is not about which is more modern. **ASGI pays off
+when a request spends its time waiting on something you can `await`.** Every
+view here is synchronous, the ORM is synchronous, `psycopg` is synchronous, and
+the one outbound HTTP call (`api/push.py`) already runs on its own thread so
+that no request waits on it at all. Run a synchronous application under ASGI and
+Django hands each view to a thread from a pool anyway — the same
+thread-per-request concurrency as gunicorn's `gthread`, with an event loop and a
+`sync_to_async` hop underneath, plus `SynchronousOnlyOperation` as a new way to
+fail.
+
+Switch when one of these arrives, not before:
+
+- a **websocket or SSE** stream, so the tracking page stops polling — this is
+  the likely first one, and `config/asgi.py` is already written for it;
+- an **SMS or payment provider on the request path**, where a thread would sit
+  idle holding a database connection (see Part 4 — that gap is the same gap);
+- **fan-out** to several services within one request.
+
+The concurrency knob today is `GUNICORN_THREADS`, and it is worth knowing it is
+two knobs at once: `WEB_CONCURRENCY × GUNICORN_THREADS × --max-instances` is the
+number of connections Postgres sees, and each is held `DB_CONN_MAX_AGE` seconds
+past its last use. Raising throughput without raising the pooler's headroom is
+how you turn a busy evening into a connection error.
 
 ## Liveness vs readiness
 
@@ -845,8 +887,9 @@ list that only grows teaches people to stop reading it.
 
 ## Before taking real money
 
-**No out-of-band notification.** The customer's only channel is keeping a
-browser tab open on `/order/{token}`. Close the tab and they have no idea when
+**No out-of-band notification — for the customer.** The *rider* now has one
+(push, see Operational below); the customer does not. Their only channel is
+keeping a browser tab open on `/order/{token}`. Close the tab and they have no idea when
 the rider is coming. For COD in a market where SMS and WhatsApp are the norm,
 this alone will generate a support call per order. It needs a provider account
 and a per-message cost, which is why it is not done rather than because it is
@@ -895,6 +938,19 @@ order is handed to the nearest eligible rider. With it off, every available
 rider in range sees every packed order and first to accept wins. An order
 declined by everyone stops appearing, which is why `GET /api/orders?stalled=true`
 exists for the manager. A timed-offer design would need a scheduler.
+
+**Rider notifications need three things switched on, and are unmetered.**
+`backend/api/push.py` buzzes a rider's phone when an order is assigned to them
+or lands in the feed, which closes the "assigned to a phone in a pocket" cost
+that automatic dispatch always carried. Nothing fires until all three of
+`eas init` (a project id in `mobile/app.json`), `eas credentials` (FCM and APNs)
+and `PUSH_ENABLED=true` are done — the first two are why the backend default is
+off. **The send is a daemon thread per notification, not a queue**, which is
+sized for one store: a second store, or a broadcast to a roster of fifty, is
+where that stops being reasonable. Nothing polls Expo's delivery receipts, so a
+notification that Expo accepted and then failed to deliver is invisible; the
+fifteen-second poll is what makes that survivable, and it is why the poll stays
+the source of truth rather than becoming a fallback.
 
 **Straight-line distance.** The delivery radius and rider ranking use haversine,
 and Aizawl is built on ridges — road distance can be several times it. A

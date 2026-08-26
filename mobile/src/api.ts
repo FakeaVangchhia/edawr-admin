@@ -175,6 +175,42 @@ export async function riderLogout(token: string): Promise<void> {
 }
 
 // --------------------------------------------------------------------------
+// Push notifications
+// --------------------------------------------------------------------------
+/**
+ * Tell the backend which handset to buzz for this rider. See src/push.ts.
+ *
+ * The rider comes from the bearer token, exactly as it does for accept, reject
+ * and status — there is no rider id in the body, and the server would ignore
+ * one. What the body carries is the *handset*: an Expo push token, which is a
+ * routing address rather than a credential.
+ *
+ * `authToken` is passed explicitly rather than read from storage because
+ * sign-out calls the sibling below after the session is already gone from
+ * state; see `riderLogout` for the same ordering problem.
+ */
+export function registerPushToken(
+  expoToken: string,
+  platform: 'ios' | 'android',
+  authToken: string,
+): Promise<void> {
+  return request('/api/delivery/push-token', {
+    method: 'POST',
+    body: { expo_token: expoToken, platform },
+    token: authToken,
+  });
+}
+
+/** Stop buzzing this handset — the rider is signing out of it. */
+export function forgetPushToken(expoToken: string, authToken: string): Promise<void> {
+  return request('/api/delivery/push-token', {
+    method: 'DELETE',
+    body: { expo_token: expoToken },
+    token: authToken,
+  });
+}
+
+// --------------------------------------------------------------------------
 // Delivery
 // --------------------------------------------------------------------------
 export function fetchDashboard(riderId: number, token: string): Promise<DeliveryDashboard> {
