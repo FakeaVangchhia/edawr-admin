@@ -280,12 +280,7 @@ function NavLink({
         href={item.href}
         onClick={onNavigate}
         aria-current={active ? 'page' : undefined}
-        className={clsx(
-          'flex items-center gap-2.5 rounded-[0.4rem] px-2.5 py-1.5 text-sm transition-colors',
-          active
-            ? 'bg-accent-quiet font-semibold text-accent'
-            : 'text-ink-soft hover:bg-hover hover:text-ink',
-        )}
+        className={clsx('nav-item', active && 'nav-item-active')}
       >
         <Icon size={16} aria-hidden="true" />
         {item.label}

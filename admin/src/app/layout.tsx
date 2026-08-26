@@ -44,8 +44,8 @@ export const viewport: Viewport = {
   // the page before React has rendered anything — without this the first frame
   // of the dark console is a white flash.
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f4f7fa' },
-    { media: '(prefers-color-scheme: dark)', color: '#080c12' },
+    { media: '(prefers-color-scheme: light)', color: '#f5f6fa' },
+    { media: '(prefers-color-scheme: dark)', color: '#070b13' },
   ],
 };
 

@@ -49,8 +49,8 @@ export default function ConsoleGlobalError({
           display: 'grid',
           placeItems: 'center',
           padding: '2rem',
-          background: '#f4f7fa',
-          color: '#0b1220',
+          background: '#f5f6fa',
+          color: '#0e1424',
           fontFamily:
             'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
         }}
@@ -78,7 +78,7 @@ export default function ConsoleGlobalError({
               padding: '0 1.25rem',
               borderRadius: '0.5rem',
               border: 'none',
-              background: '#0b1220',
+              background: '#0e1424',
               color: '#ffffff',
               fontSize: '0.875rem',
               fontWeight: 600,

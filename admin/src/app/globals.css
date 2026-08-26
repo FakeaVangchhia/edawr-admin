@@ -3,15 +3,16 @@
 /* ==========================================================================
    eDawr Console — the design system for the admin and manager application.
 
-   THIS IS NOT THE STOREFRONT, AND IT SHOULD NEVER BE MISTAKEN FOR IT.
+   SAME BRAND AS THE STOREFRONT, DELIBERATELY DIFFERENT INSTRUMENT.
 
-   The shop is light-only, borderless, and built on amber #F5A623 over navy;
-   its surfaces float on shadows and its rhythm is generous, because it is
-   selling. This is the opposite instrument: a dark-first, bordered, dense
-   console for someone who has it open for eight hours and is reading numbers
-   out of it, not being sold to.
+   The shop is light-only, borderless and generous, because it is selling. This
+   is a dark-first, bordered, dense console for someone who has it open for
+   eight hours and is reading numbers out of it. It now wears the same colours —
+   Deep Navy #080E20 and Golden Amber #F5A623 — because a manager moving between
+   the two should not feel they have changed companies. What does not transfer
+   is the shop's rhythm: nothing below got rounder, airier or more shadowed.
 
-   Four decisions follow from that, and everything below is one of them:
+   Five decisions follow, and everything after this is one of them:
 
    1. DARK FIRST, WITH A REAL LIGHT MODE. Long shifts, often at night, often on
       a phone in a stockroom. The light mode is not an afterthought — the store
@@ -19,17 +20,31 @@
 
    2. BORDERS, NOT SHADOWS. A data table needs its columns delimited. Shadow-
       separated cards are for content you browse; hairlines are for content you
-      scan. This also happens to be the fastest way to tell the two apps apart
-      at a glance, which is the point.
+      scan.
 
    3. TABULAR NUMERALS EVERYWHERE A FIGURE APPEARS. Money and stock live in
       columns here. Proportional digits make ₹1,111 wider than ₹8,888 and the
       column stops lining up, which is how a misread happens.
 
-   4. AMBER IS A WARNING, NOT A BRAND. In the shop amber means "eDawr". Here it
-      means "look at this". Reusing the storefront's brand colour as a status
-      colour would be actively confusing, so the accent is cool — teal — and
-      amber is reserved for things that need attention.
+   4. AMBER IS A FILL, NEVER INK — and that rule is what makes sharing the
+      brand possible at all. #F5A623 on white measures 2.03:1. It fails AA for
+      text by a factor of two, so it can never be a link, a label or a status
+      word. It appears here only as a *surface*: the primary button, the active
+      nav marker, a selected row. Navy sits on top of it at 9.06:1.
+
+      Interactive TEXT therefore uses `--c-accent`, which is the same hue
+      darkened until it is readable — bronze #9A5B0B at 5.4:1 on light. In dark
+      mode the ground is navy, so `--c-accent` becomes the bright amber itself
+      at 9.05:1. One family, two lightnesses, both legible.
+
+   5. STATUS COLOURS OWN THEIR OWN HUES. With amber taken by the brand, "look
+      at this" moved off gold onto a hotter orange (#C2410C light, #FB923C
+      dark). It is far enough from both the brand amber and the danger red to
+      be read at a glance, which the previous amber warning no longer would be.
+
+   Every pair below was measured rather than eyeballed; the ratios in the
+   comments are real. Anything added later has to clear 4.5:1 as text and 3:1
+   as a control boundary, or it does not belong in a tool people work in.
 
    Colour is defined twice: raw values in the palette blocks below, and Tailwind
    tokens in `@theme inline` that point at them. That indirection is what lets
@@ -44,34 +59,48 @@
 :root {
   color-scheme: light dark;
 
-  --c-canvas: #f4f7fa;        /* the page ground */
+  /* Neutrals carry the navy hue of the brand rather than a generic blue-grey,
+     so the two apps sit in the same family before a single accent is placed. */
+  --c-canvas: #f5f6fa;        /* the page ground */
   --c-surface: #ffffff;       /* panels, tables, cards */
-  --c-raised: #f1f5f9;        /* inputs, wells, secondary buttons */
-  --c-hover: #e6edf5;
-  --c-line: #dfe6ee;          /* hairlines: the main structural device */
-  --c-line-strong: #c3cedb;   /* table headers, focused inputs */
+  --c-raised: #f1f2f7;        /* inputs, wells, secondary buttons */
+  --c-hover: #e8eaf1;
+  --c-line: #e3e5ec;          /* hairlines: the main structural device */
+  --c-line-strong: #c6cad8;   /* table headers, focused inputs */
 
-  /* Contrast against --c-surface: 16.9 / 8.1 / 5.4. The faint tone is the
-     floor — anything lighter stops being readable text and becomes decoration. */
-  --c-ink: #0e1a2b;
-  --c-ink-soft: #47566b;
-  --c-ink-faint: #66768c;
+  /* Contrast against --c-surface: 18.4 / 7.6 / 5.3, and every one of them still
+     clears 4.5 against --c-canvas and --c-raised, which is the harder test and
+     the one the faint tone previously failed. That tone is the floor — anything
+     lighter stops being readable text and becomes decoration. */
+  --c-ink: #0e1424;           /* Deep Navy, lifted just enough to read as text */
+  --c-ink-soft: #4a5468;
+  --c-ink-faint: #626c83;
 
-  --c-accent: #0d9488;        /* teal-600: 4.8:1 on white, usable as text */
-  --c-accent-strong: #0f766e;
-  --c-accent-quiet: #ecfdf8;  /* tinted backgrounds for selected rows */
-  --c-on-accent: #ffffff;
+  /* Interactive TEXT. The brand amber darkened until it is legible — 5.4:1 on
+     white. Never use --c-brand here; see decision 4 in the header. */
+  --c-accent: #9a5b0b;
+  --c-accent-strong: #7c4708; /* hover, and the focus ring at 7.6:1 */
+  --c-accent-quiet: #fdf5e7;  /* tinted backgrounds for selected rows */
+
+  /* The brand as a FILL: primary buttons, the active nav marker. Navy sits on
+     it at 9.06:1. The edge exists because the fill itself is only 2.03:1
+     against white — without a rim the button has no boundary, which is the one
+     WCAG requirement a coloured fill cannot meet on its own. */
+  --c-brand: #f5a623;
+  --c-brand-strong: #e59712;
+  --c-brand-edge: #c47f0a;    /* 3.3:1 on white */
+  --c-on-brand: #0e1424;
 
   --c-ok: #047857;
   --c-ok-quiet: #ecfdf5;
-  --c-warn: #b45309;
-  --c-warn-quiet: #fffbeb;
+  --c-warn: #c2410c;          /* moved off gold; see decision 5 */
+  --c-warn-quiet: #fff2eb;
   --c-danger: #b91c1c;
   --c-danger-quiet: #fef2f2;
   --c-info: #1d4ed8;
   --c-info-quiet: #eff6ff;
 
-  --c-shadow: 15 26 43;
+  --c-shadow: 14 20 36;
 }
 
 /* --------------------------------------------------------------------------
@@ -81,30 +110,37 @@
    -------------------------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --c-canvas: #080c12;
-    --c-surface: #10161f;
-    --c-raised: #171f2a;
-    --c-hover: #1e2836;
-    --c-line: #222d3b;
-    --c-line-strong: #33415a;
+    /* The ground is Deep Navy itself here, which is why the brand amber can be
+       used at full strength: on this surface it measures 9.05:1. */
+    --c-canvas: #070b13;
+    --c-surface: #0f1423;
+    --c-raised: #161d2f;
+    --c-hover: #1e263a;
+    --c-line: #212a3f;
+    --c-line-strong: #333e58;
 
-    /* Against --c-surface: 15.2 / 7.6 / 5.1 — matching the light theme's
+    /* Against --c-surface: 15.6 / 8.0 / 4.8 — matching the light theme's
        ratios rather than its lightnesses, so hierarchy reads the same in both. */
-    --c-ink: #e9eff8;
-    --c-ink-soft: #a2b1c6;
-    --c-ink-faint: #78889e;
+    --c-ink: #e9ecf6;
+    --c-ink-soft: #a3abc0;
+    --c-ink-faint: #7a839a;
 
-    /* Teal has to lighten in dark mode. #0d9488 on #10161f is 2.6:1 — invisible.
-       The 300-weight is 8.9:1 and still unmistakably the same hue. */
-    --c-accent: #5eead4;
-    --c-accent-strong: #2dd4bf;
-    --c-accent-quiet: #0c2b28;
-    --c-on-accent: #04211d;
+    /* On a navy ground the brand amber IS the legible one, so interactive text
+       and the fill converge on a single value here. They diverge only in light
+       mode, where amber cannot be ink. */
+    --c-accent: #f5a623;
+    --c-accent-strong: #ffbf4d;
+    --c-accent-quiet: #2b1f09;
+
+    --c-brand: #f5a623;
+    --c-brand-strong: #ffbf4d;
+    --c-brand-edge: #f5a623;   /* the fill is already 9:1 here; no rim needed */
+    --c-on-brand: #0e1424;
 
     --c-ok: #6ee7b7;
     --c-ok-quiet: #0a2b22;
-    --c-warn: #fcd34d;
-    --c-warn-quiet: #2c2410;
+    --c-warn: #fb923c;
+    --c-warn-quiet: #2e1b0c;
     --c-danger: #fca5a5;
     --c-danger-quiet: #2e1618;
     --c-info: #93c5fd;
@@ -117,23 +153,26 @@
 /* The explicit choice, which must beat the media query in both directions. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --c-canvas: #080c12;
-  --c-surface: #10161f;
-  --c-raised: #171f2a;
-  --c-hover: #1e2836;
-  --c-line: #222d3b;
-  --c-line-strong: #33415a;
-  --c-ink: #e9eff8;
-  --c-ink-soft: #a2b1c6;
-  --c-ink-faint: #78889e;
-  --c-accent: #5eead4;
-  --c-accent-strong: #2dd4bf;
-  --c-accent-quiet: #0c2b28;
-  --c-on-accent: #04211d;
+  --c-canvas: #070b13;
+  --c-surface: #0f1423;
+  --c-raised: #161d2f;
+  --c-hover: #1e263a;
+  --c-line: #212a3f;
+  --c-line-strong: #333e58;
+  --c-ink: #e9ecf6;
+  --c-ink-soft: #a3abc0;
+  --c-ink-faint: #7a839a;
+  --c-accent: #f5a623;
+  --c-accent-strong: #ffbf4d;
+  --c-accent-quiet: #2b1f09;
+  --c-brand: #f5a623;
+  --c-brand-strong: #ffbf4d;
+  --c-brand-edge: #f5a623;
+  --c-on-brand: #0e1424;
   --c-ok: #6ee7b7;
   --c-ok-quiet: #0a2b22;
-  --c-warn: #fcd34d;
-  --c-warn-quiet: #2c2410;
+  --c-warn: #fb923c;
+  --c-warn-quiet: #2e1b0c;
   --c-danger: #fca5a5;
   --c-danger-quiet: #2e1618;
   --c-info: #93c5fd;
@@ -165,7 +204,18 @@
   --color-accent: var(--c-accent);
   --color-accent-strong: var(--c-accent-strong);
   --color-accent-quiet: var(--c-accent-quiet);
-  --color-on-accent: var(--c-on-accent);
+
+  /* `bg-brand` / `text-on-brand` are a matched pair and should be used as one.
+     There is deliberately no `text-brand`: amber ink is the mistake decision 4
+     exists to prevent, and a utility class is how it would get made.
+
+     There is also no `on-accent` any more. It paired with an accent that was a
+     *fill*; this one is a text colour, so nothing sits on top of it and a token
+     that names a relationship which no longer exists is worse than no token. */
+  --color-brand: var(--c-brand);
+  --color-brand-strong: var(--c-brand-strong);
+  --color-brand-edge: var(--c-brand-edge);
+  --color-on-brand: var(--c-on-brand);
 
   --color-ok: var(--c-ok);
   --color-ok-quiet: var(--c-ok-quiet);
@@ -304,11 +354,18 @@
     cursor: not-allowed;
   }
 
+  /* The brand, as a fill. The border is not decoration: amber on white is
+     2.03:1, so without a rim the button's own edge is invisible and it stops
+     being identifiable as a control. The rim is 3.3:1 and does the job the
+     fill cannot. In dark mode the fill is already 9:1, and the two values are
+     the same colour there. */
   .btn-primary {
-    background: var(--c-accent);
-    color: var(--c-on-accent);
+    background: var(--c-brand);
+    border-color: var(--c-brand-edge);
+    color: var(--c-on-brand);
+    font-weight: 600;
   }
-  .btn-primary:hover:not(:disabled) { background: var(--c-accent-strong); }
+  .btn-primary:hover:not(:disabled) { background: var(--c-brand-strong); }
 
   .btn-secondary {
     background: var(--c-raised);
@@ -397,6 +454,48 @@
   .badge-danger  { background: var(--c-danger-quiet); border-color: var(--c-danger); color: var(--c-danger); }
   .badge-info    { background: var(--c-info-quiet);   border-color: var(--c-info);   color: var(--c-info); }
   .badge-accent  { background: var(--c-accent-quiet); border-color: var(--c-accent); color: var(--c-accent); }
+  /* The brand as a badge — a filled amber chip with navy on it, which is the
+     storefront's own treatment. Use it for the one thing on a screen that is
+     genuinely branded, not as a fifth status colour. */
+  .badge-brand   { background: var(--c-brand); border-color: var(--c-brand-edge); color: var(--c-on-brand); }
+
+  /* --- navigation --- */
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: 0.4rem;
+    padding: 0.375rem 0.625rem;
+    font-size: var(--text-sm);
+    color: var(--c-ink-soft);
+    transition: background 140ms var(--ease-out-quick),
+                color 140ms var(--ease-out-quick);
+  }
+
+  .nav-item:hover {
+    background: var(--c-hover);
+    color: var(--c-ink);
+  }
+
+  /* The section you are in carries the brand as a fill: a rail down the
+     leading edge, not a coloured word. Two reasons it is a rail. It is the one
+     place the amber can be used at full strength without becoming ink, and it
+     is a *position* cue as well as a colour one — so the active row still
+     reads as active to someone who cannot separate gold from grey.
+     `inset` shadow rather than a border, so nothing shifts by 2px when the
+     state changes and the pill keeps its own radius. */
+  .nav-item-active {
+    background: var(--c-accent-quiet);
+    color: var(--c-accent);
+    font-weight: 600;
+    box-shadow: inset 2px 0 0 0 var(--c-brand);
+  }
+
+  .nav-item-active:hover {
+    background: var(--c-accent-quiet);
+    color: var(--c-accent);
+  }
 
   /* --- tables --- */
   .table {
