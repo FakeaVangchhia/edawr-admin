@@ -1,20 +1,20 @@
-# Run the tests on every push and pull request.
+# Run the console's tests on every push and pull request.
 #
-# There was no CI at all before this: tests that ran only when someone
-# remembered. Manual deploys are fine at this scale for a long time — untested
-# merges are not, and that is the gap this closes. Deployment stays manual on
-# purpose; see PRODUCTION.md.
+# This repository holds the staff console alone. It was split out of the eDawr
+# monorepo, which was then dissolved: the API lives in `edawr-backend`, and the
+# storefront and rider app are no longer under version control at all. Nothing
+# here can test those, and it should not try — a job that reaches outside its
+# own repository is a job that breaks whenever anything around it moves.
 #
-# Counts are deliberately not written down here. They were, and they went stale
-# within a fortnight, which taught the next reader to distrust the comment
-# rather than to update it. `npm test` and `manage.py test` report the truth.
+# This is therefore one of only two pipelines left in the project. The
+# storefront's equivalent — the same steps, including the prerender check — was
+# removed with the monorepo and survives only in the history bundle on the
+# developer's disk. If the storefront is ever given a repository again, that
+# workflow is the thing to restore first.
 #
-# **The backend is a separate git repository** (`edawr-backend`), ignored by the
-# root repo, so this file cannot test it from here. The `backend` job below is
-# the same workflow, copied into that repository — it is kept in this file as
-# well so the two do not drift silently, and so anyone reading the root repo can
-# see what the API's pipeline is. Delete the copy if the repositories are ever
-# merged with `git subtree`.
+# Counts are deliberately not written down. They go stale within a fortnight,
+# which teaches the next reader to distrust the comment rather than update it.
+# `npm test` reports the truth.
 
 name: CI
 
@@ -30,12 +30,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  storefront:
-    name: Storefront (frontend/)
+  console:
+    name: Console
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +40,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # `ci` rather than `install`: it installs exactly the lockfile and fails
       # if package.json disagrees with it, rather than quietly resolving
@@ -60,11 +57,6 @@ jobs:
 
       - run: npm test
 
-      # The build is the test that matters most here and the one a human is
-      # least likely to run: `next dev` renders every route per request, so the
-      # prerendering behaviour that the nonce-based CSP depends on only exists
-      # in a production build. A layout that stops being dynamic passes every
-      # other check and ships a storefront that paints and never hydrates.
       - name: Build
         run: npm run build
         env:
@@ -84,137 +76,3 @@ jobs:
             echo "$stray"
             exit 1
           fi
-
-  console:
-    name: Console (admin/)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: admin
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: admin/package-lock.json
-
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm test
-
-      - name: Build
-        run: npm run build
-        env:
-          NEXT_PUBLIC_API_URL: https://api.example.invalid
-
-      - name: Every route must be server-rendered
-        run: |
-          stray=$(find .next/server/app -name '*.html' ! -name '_global-error.html')
-          if [ -n "$stray" ]; then
-            echo "::error::Prerendered pages found — the root layout has stopped calling await connection():"
-            echo "$stray"
-            exit 1
-          fi
-
-  # ---------------------------------------------------------------------------
-  # The rider app had no CI at all: not linted, not typechecked, not built, and
-  # with no test runner to run. It is also the package where a mistake is
-  # hardest to correct — there is no expo-updates channel, so a fix means a
-  # store submission and a rider updating an app mid-shift.
-  #
-  # These two checks are what the package actually supports today. `expo-doctor`
-  # is not ceremony: it catches a dependency whose version disagrees with the
-  # installed Expo SDK, which is the failure mode that produces a build that
-  # compiles and crashes on a real device.
-  #
-  # No test job, because there is no test runner. Adding jest-expo is a real
-  # piece of work and is listed in PRODUCTION.md Part 4 rather than pretended at
-  # here.
-  # ---------------------------------------------------------------------------
-  mobile:
-    name: Rider app (mobile/)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
-
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npx expo-doctor
-
-  # ---------------------------------------------------------------------------
-  # The API's pipeline. This job does nothing in *this* repository — `backend/`
-  # is gitignored here, so there is no source for it to run against. It is the
-  # workflow that belongs in the `edawr-backend` repository, kept here so the
-  # two are visibly the same thing.
-  # ---------------------------------------------------------------------------
-  backend:
-    name: API (runs in edawr-backend)
-    if: ${{ false }}
-    runs-on: ubuntu-latest
-    services:
-      # Postgres, not SQLite, and this is the whole point of having a service
-      # container. `select_for_update()` is a no-op on SQLite, so the lock that
-      # stops the last unit of stock being sold twice is untested there — the
-      # suite would pass while the invariant it exists to protect was unverified.
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: edawr
-          POSTGRES_PASSWORD: edawr
-          POSTGRES_DB: edawr
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      DATABASE_URL: postgres://edawr:edawr@localhost:5432/edawr
-      # Not the published placeholder: `check_production_safety()` warns on it
-      # even in development, and a warning in CI output is a warning nobody
-      # reads after the third time.
-      JWT_SECRET: ci-only-not-a-real-secret-and-never-deployed
-      DJANGO_SECRET_KEY: ci-only-not-a-real-secret-and-never-deployed
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      # `--frozen` fails if uv.lock disagrees with pyproject.toml rather than
-      # silently re-resolving. CI is exactly where you want to find that out.
-      - run: uv sync --frozen
-
-      - name: Migrations are committed and complete
-        # Catches the classic omission: a model edited, `makemigrations` never
-        # run, and the schema drifting from the code until a deploy discovers it.
-        run: uv run manage.py makemigrations --check --dry-run
-
-      - run: uv run manage.py migrate
-
-      - run: uv run manage.py test
-
-      - name: Deployment checks
-        # The production posture, not the development one — HSTS, SSL redirect,
-        # cookie flags. It comes back clean today and should stay that way.
-        run: uv run manage.py check --deploy
-        env:
-          ENVIRONMENT: production
-          ALLOWED_HOSTS: api.example.invalid
-          CORS_ORIGINS: https://example.invalid
-          CACHE_URL: redis://localhost:6379/0

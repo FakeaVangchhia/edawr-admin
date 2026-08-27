@@ -15,12 +15,7 @@
 *.gif binary
 *.webp binary
 *.ico binary
-*.db binary
-*.sqlite3 binary
-*.keystore binary
-*.jks binary
 
-# Generated lockfiles: keep them in the repo, but collapse them in diffs and
-# don't let GitHub count them as authored code.
+# Generated lockfile: keep it in the repo, but collapse it in diffs and don't
+# let GitHub count it as authored code.
 package-lock.json linguist-generated=true -diff
-uv.lock linguist-generated=true -diff
