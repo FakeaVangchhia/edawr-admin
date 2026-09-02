@@ -29,10 +29,39 @@ const securityHeaders = [
   { key: "X-Robots-Tag", value: "noindex, nofollow" },
 ];
 
+/**
+ * HSTS, one year, production builds only.
+ *
+ * The API already sends this (`SECURE_HSTS_SECONDS` in the backend's settings),
+ * and a console that does not is the weaker half of the pair: this is where the
+ * password is typed, so a first request over plain HTTP is a password on the
+ * wire. The header tells the browser never to try HTTP for this host again.
+ *
+ * `includeSubDomains` is scoped to subdomains of the console's own host, which
+ * is a subdomain itself — it says nothing about the apex or about the
+ * storefront. No `preload`: that is a submission to a browser-vendor list,
+ * belongs on the apex domain rather than here, and is close to irreversible.
+ *
+ * Guarded on NODE_ENV because a header a browser ignores over plain HTTP is
+ * still a header worth not sending in development, where the answer to "why is
+ * localhost forcing HTTPS" costs an afternoon.
+ */
+const productionOnlyHeaders =
+  process.env.NODE_ENV === "production"
+    ? [
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=31536000; includeSubDomains",
+        },
+      ]
+    : [];
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: [...securityHeaders, ...productionOnlyHeaders] },
+    ];
   },
 };
 
