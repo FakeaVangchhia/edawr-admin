@@ -1,6 +1,55 @@
 import type { NextConfig } from "next";
 
 /**
+ * Refuse to produce a build that cannot talk to the API.
+ *
+ * `src/proxy.ts` derives the CSP's `connect-src` and `img-src` from
+ * NEXT_PUBLIC_API_URL, and it is written to degrade quietly: an unset or
+ * unparseable value yields an empty origin, the policy comes out as
+ * `connect-src 'self'`, and the browser blocks every request the console makes.
+ * The console then renders perfectly and loads no data — and because it is the
+ * *browser* refusing, nothing appears in a deploy log, a health check or an
+ * error report. A hosting dashboard where nobody filled the variable in
+ * produces exactly this, and it stays invisible until a person opens the site.
+ *
+ * That is too quiet a failure for the most consequential variable here, so the
+ * build stops instead. Development is exempt: `next dev` is where you are
+ * allowed to have half a configuration.
+ *
+ * CI sets a syntactically valid placeholder — nothing is fetched at build time,
+ * so any absolute http(s) URL satisfies this.
+ */
+if (process.env.NODE_ENV === "production") {
+  const raw = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+  let origin = "";
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      origin = parsed.origin;
+    }
+  } catch {
+    // Leaves origin empty, which the check below reports.
+  }
+
+  if (!origin) {
+    const what = raw ? `not a usable http(s) URL (got ${JSON.stringify(raw)})` : "unset";
+    throw new Error(
+      [
+        `NEXT_PUBLIC_API_URL is ${what}.`,
+        "",
+        "It names the Django API in the CSP's connect-src and img-src, and is",
+        "baked into the client bundle — so a build without it ships a console",
+        "whose screens render and whose data never arrives.",
+        "",
+        "Set it on the deployment (and in .env locally), scheme included and no",
+        "trailing slash, e.g. https://api.example.com — then rebuild. Changing",
+        "it needs a rebuild, not a restart.",
+      ].join("\n"),
+    );
+  }
+}
+
+/**
  * Static security headers for the console.
  *
  * The per-request Content Security Policy lives in `src/proxy.ts`, because it
