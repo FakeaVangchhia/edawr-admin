@@ -82,7 +82,15 @@ export function ProductDrawer({
   product: Product | null;
   categories: Category[];
   onClose: () => void;
-  onSaved: () => void;
+  /**
+   * Reports *what happened*, not merely that the drawer is finished.
+   *
+   * `changed` is the interesting one: this form deliberately writes nothing
+   * when nothing was edited, and until the caller could tell that apart from a
+   * real save it had to either stay quiet about every save or claim one that
+   * never happened.
+   */
+  onSaved: (result: { name: string; created: boolean; changed: boolean }) => void;
 }) {
   const [form, setForm] = useState<FormState>(() =>
     product ? toForm(product) : EMPTY,
@@ -184,7 +192,7 @@ export function ProductDrawer({
     if (product && Object.keys(changed).length === 0) {
       // Nothing to write. Saving anyway would cost an audit row saying nobody
       // changed anything.
-      onSaved();
+      onSaved({ name: product.name, created: false, changed: false });
       return;
     }
 
@@ -195,7 +203,7 @@ export function ProductDrawer({
       } else {
         await createProduct(body);
       }
-      onSaved();
+      onSaved({ name: form.name.trim(), created: product === null, changed: true });
     } catch (caught) {
       if (caught instanceof ApiError) {
         const fields = caught.fieldErrors;

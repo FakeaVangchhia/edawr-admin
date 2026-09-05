@@ -540,6 +540,13 @@
   100% { background-position: 0 50%; }
 }
 
+/* A confirmation slides up the height of itself and no further. Anything larger
+   is a thing that moves across the screen while someone is reading a table. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* A shimmering skeleton and a sliding drawer are decoration. Someone who has
    asked for less motion should get a static placeholder, not a slower one. */
 @media (prefers-reduced-motion: reduce) {

@@ -23,6 +23,11 @@ import {
 
 import { clsx } from 'clsx';
 
+/* Re-exported so every screen still imports its UI from one place. The toast
+   lives in its own file because it is a provider that owns a queue, and
+   everything else here is presentational and stateless. */
+export { ToastProvider, useToast, type Toaster } from './toast';
+
 /* --- layout -------------------------------------------------------------- */
 
 export function PageHeader({

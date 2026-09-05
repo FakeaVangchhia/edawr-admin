@@ -3,7 +3,7 @@
 import { AlertTriangle, MapPin, Phone, User } from 'lucide-react';
 import { useState } from 'react';
 
-import { ConfirmDialog, Drawer, ErrorBanner, StatusBadge } from '@/components/ui';
+import { ConfirmDialog, Drawer, ErrorBanner, StatusBadge, useToast } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { advanceOrder, assignOrder, restockOrder } from '@/lib/queries';
 import { dateTime, minutes, money, phone as formatPhone } from '@/lib/format';
@@ -27,13 +27,53 @@ import type { Order, OrderStatus, StaffUser } from '@/types';
  * separate `Return stock to shelf` action below, taken when the rider is
  * actually back — see `restockOrder`.
  */
-const NEXT_STEPS: Record<OrderStatus, { status: OrderStatus; label: string }[]> = {
-  Placed: [{ status: 'Packing', label: 'Start packing' }],
-  Packing: [{ status: 'Ready', label: 'Mark ready' }],
-  Ready: [{ status: 'Packing', label: 'Back to packing' }],
+interface Step {
+  status: OrderStatus;
+  label: string;
+  /**
+   * What the operator is told once it lands — and it names the side effect
+   * rather than repeating the button. Every one of these moves does something
+   * to stock or to money that is invisible on this screen: marking an order
+   * delivered records the cash, cancelling puts the units back, failing does
+   * not. "Saved" would be true and useless.
+   */
+  done: (order: Order) => string;
+}
+
+const NEXT_STEPS: Record<OrderStatus, Step[]> = {
+  Placed: [
+    {
+      status: 'Packing',
+      label: 'Start packing',
+      done: (order) => `Order #${order.id} is being packed.`,
+    },
+  ],
+  Packing: [
+    {
+      status: 'Ready',
+      label: 'Mark ready',
+      done: (order) => `Order #${order.id} is ready — a rider is being found for it.`,
+    },
+  ],
+  Ready: [
+    {
+      status: 'Packing',
+      label: 'Back to packing',
+      done: (order) => `Order #${order.id} is back in packing.`,
+    },
+  ],
   Dispatched: [
-    { status: 'Delivered', label: 'Mark delivered' },
-    { status: 'Ready', label: 'Return to pool' },
+    {
+      status: 'Delivered',
+      label: 'Mark delivered',
+      done: (order) =>
+        `Order #${order.id} delivered. ${money(order.grand_total)} recorded as collected.`,
+    },
+    {
+      status: 'Ready',
+      label: 'Return to pool',
+      done: (order) => `Order #${order.id} is back in the pool for another rider.`,
+    },
   ],
   Delivered: [],
   Cancelled: [],
@@ -56,6 +96,7 @@ export function OrderDrawer({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [riderId, setRiderId] = useState('');
@@ -84,11 +125,19 @@ export function OrderDrawer({
 
   if (!order) return null;
 
-  async function run(action: () => Promise<unknown>) {
+  /**
+   * `success` is required rather than optional. Every action in this drawer
+   * closes it, so without a confirmation the only evidence anything happened is
+   * that the board looks slightly different — and on a slow connection that is
+   * indistinguishable from a click the browser dropped, which is how an order
+   * gets advanced twice.
+   */
+  async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
     setError('');
     try {
       await action();
+      toast.success(success);
       onChanged();
     } catch (caught) {
       // A 409 here is informative, not a failure of the console: somebody else
@@ -126,7 +175,7 @@ export function OrderDrawer({
                   type="button"
                   className="btn btn-primary"
                   disabled={busy}
-                  onClick={() => run(() => advanceOrder(order.id, step.status))}
+                  onClick={() => run(() => advanceOrder(order.id, step.status), step.done(order))}
                 >
                   {step.label}
                 </button>
@@ -157,7 +206,12 @@ export function OrderDrawer({
                 type="button"
                 className="btn btn-primary"
                 disabled={busy}
-                onClick={() => run(() => restockOrder(order.id))}
+                onClick={() =>
+                  run(
+                    () => restockOrder(order.id),
+                    `The units from order #${order.id} are back on the shelf.`,
+                  )
+                }
               >
                 Return stock to shelf
               </button>
@@ -323,7 +377,15 @@ export function OrderDrawer({
                     type="button"
                     className="btn btn-secondary"
                     disabled={!riderId || busy}
-                    onClick={() => run(() => assignOrder(order.id, Number(riderId)))}
+                    onClick={() =>
+                      run(
+                        () => assignOrder(order.id, Number(riderId)),
+                        `Order #${order.id} is on its way with ${
+                          availableRiders.find((rider) => rider.id === Number(riderId))?.name ??
+                          'the chosen rider'
+                        }.`,
+                      )
+                    }
                   >
                     {order.rider ? 'Reassign' : 'Assign'}
                   </button>
@@ -374,7 +436,10 @@ export function OrderDrawer({
         onCancel={() => setConfirmCancel(false)}
         onConfirm={() => {
           setConfirmCancel(false);
-          run(() => advanceOrder(order.id, 'Cancelled', reason.trim()));
+          run(
+            () => advanceOrder(order.id, 'Cancelled', reason.trim()),
+            `Order #${order.id} cancelled. The stock is back on the shelf.`,
+          );
         }}
       />
 
@@ -417,7 +482,10 @@ export function OrderDrawer({
         onCancel={() => setConfirmFail(false)}
         onConfirm={() => {
           setConfirmFail(false);
-          run(() => advanceOrder(order.id, 'Failed', reason.trim()));
+          run(
+            () => advanceOrder(order.id, 'Failed', reason.trim()),
+            `Order #${order.id} recorded as a failed delivery. The stock is still with the rider.`,
+          );
         }}
       />
     </>

@@ -13,6 +13,7 @@ import {
   Pagination,
   Panel,
   TableSkeleton,
+  useToast,
 } from '@/components/ui';
 import { ApiError, errorMessage } from '@/lib/api';
 import { ROLE_LABEL } from '@/lib/guard';
@@ -56,9 +57,10 @@ function Accounts() {
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [creating, setCreating] = useState(false);
   const [deactivating, setDeactivating] = useState<AdminAccount | null>(null);
-  const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const toast = useToast();
 
   // Memoised because `?? []` produces a new array on every render, which would
   // make the memo below recompute every time and defeat its purpose.
@@ -103,7 +105,13 @@ function Accounts() {
     setActionError('');
     try {
       const result = await deactivateAccount(deactivating.id);
-      setNotice(result.detail ?? `${deactivating.email} can no longer sign in.`);
+      // The server's sentence when it has one — it is the only thing that can
+      // report an outcome other than the one that was asked for.
+      if (result.detail) {
+        toast.info(result.detail);
+      } else {
+        toast.success(`${deactivating.email} can no longer sign in.`);
+      }
       setDeactivating(null);
       refresh();
       // The lock guard reads its own query, so it has to be told too — else
@@ -142,11 +150,6 @@ function Accounts() {
         </p>
       </div>
 
-      {notice ? (
-        <div className="mb-4 rounded-[0.4rem] border border-info bg-info-quiet px-3 py-2 text-sm text-info">
-          {notice}
-        </div>
-      ) : null}
       {actionError ? (
         <div className="mb-4">
           <ErrorBanner message={actionError} />
@@ -264,10 +267,14 @@ function Accounts() {
             setCreating(false);
             setEditing(null);
           }}
-          onSaved={() => {
+          onSaved={(saved) => {
+            toast.success(
+              editing
+                ? `${saved.email} saved.`
+                : `${saved.email} can sign in now, as a ${ROLE_LABEL[saved.role]}.`,
+            );
             setCreating(false);
             setEditing(null);
-            setNotice('');
             refresh();
             // Creating an Admin, or changing someone's role, changes the answer
             // to "is this the last one?".
@@ -301,7 +308,8 @@ function AccountDrawer({
   isSelf: boolean;
   lockReason: string | null;
   onClose: () => void;
-  onSaved: () => void;
+  /** Reports the account as saved, so the caller can name it in a confirmation. */
+  onSaved: (saved: { email: string; role: Role }) => void;
 }) {
   const [email, setEmail] = useState(account?.email ?? '');
   const [name, setName] = useState(account?.name ?? '');
@@ -349,7 +357,7 @@ function AccountDrawer({
           password,
         });
       }
-      onSaved();
+      onSaved({ email: email.trim(), role: account && roleLocked ? account.role : role });
     } catch (caught) {
       if (caught instanceof ApiError) {
         const fields = caught.fieldErrors;

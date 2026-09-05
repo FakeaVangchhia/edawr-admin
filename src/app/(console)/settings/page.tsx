@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ExternalLink, Info, Loader2 } from 'lucide-react';
 
-import { ErrorBanner, PageHeader, Panel } from '@/components/ui';
+import { ErrorBanner, PageHeader, Panel, useToast } from '@/components/ui';
 import { API_BASE_URL, errorMessage } from '@/lib/api';
 import { minutes, money } from '@/lib/format';
 import { storeConfig, storeSettings, updateStoreSettings } from '@/lib/queries';
@@ -198,13 +198,13 @@ function OperationsForm({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState('');
+
+  const toast = useToast();
 
   const draft = edits?.from === settings ? edits.value : settings;
 
   const patch = <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => {
     setEdits({ from: settings, value: { ...draft, [key]: value } });
-    setSaved('');
   };
 
   /** Everything the form owns, as the API wants it. */
@@ -233,12 +233,12 @@ function OperationsForm({
    * `0`) would silently ship that too — and a zero radius or a zero latitude
    * changes what checkout accepts. The switch now sends one field.
    */
-  async function save(body: Partial<StoreSettings>) {
+  async function save(body: Partial<StoreSettings>, success: string) {
     setBusy(true);
     setError('');
     try {
       await updateStoreSettings(body);
-      setSaved('Saved.');
+      toast.success(success);
       onSaved();
     } catch (caught) {
       // The server's own sentence. A slipped decimal point in the radius comes
@@ -260,12 +260,6 @@ function OperationsForm({
         </div>
       ) : null}
 
-      {/* Always mounted, text swapped — a region inserted at the moment its
-          content first changes is not announced by most screen readers. */}
-      <p role="status" aria-live="polite" className="mb-2 min-h-4 text-xs text-ok">
-        {saved}
-      </p>
-
       <div className="grid gap-4 lg:grid-cols-2">
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
@@ -285,7 +279,15 @@ function OperationsForm({
                 // control someone reaches for during a power cut. Making them
                 // find "Save" afterwards is how orders keep arriving for another
                 // thirty seconds.
-                void save({ is_accepting_orders: next });
+                // The confirmation states the consequence, not the click. This
+                // is the switch that stops a shop taking money, and "Saved" is
+                // not an answer to "did I just close the store?".
+                void save(
+                  { is_accepting_orders: next },
+                  next
+                    ? 'Checkout is open again — the storefront is taking orders.'
+                    : 'Checkout is paused. The storefront is no longer taking orders.',
+                );
               }}
             />
             <span>
@@ -428,7 +430,7 @@ function OperationsForm({
           type="button"
           className="btn btn-primary"
           disabled={busy}
-          onClick={() => save(wholeForm())}
+          onClick={() => save(wholeForm(), 'Store settings saved.')}
         >
           {busy ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : null}
           Save settings
@@ -440,7 +442,6 @@ function OperationsForm({
           onClick={() => {
             setEdits(null);
             setError('');
-            setSaved('');
           }}
         >
           Discard changes

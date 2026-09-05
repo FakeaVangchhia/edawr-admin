@@ -13,6 +13,7 @@ import {
   Pagination,
   Panel,
   TableSkeleton,
+  useToast,
 } from '@/components/ui';
 import { assetUrl, errorMessage } from '@/lib/api';
 import {
@@ -43,6 +44,8 @@ export default function CategoriesPage() {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const toast = useToast();
+
   const rows = categories.data?.rows ?? [];
   const total = categories.data?.total ?? 0;
 
@@ -52,6 +55,7 @@ export default function CategoriesPage() {
     setActionError('');
     try {
       await deleteCategory(deleting.id);
+      toast.success(`${deleting.name} removed from the storefront rail.`);
       setDeleting(null);
       refresh();
     } catch (caught) {
@@ -192,7 +196,8 @@ export default function CategoriesPage() {
             setCreating(false);
             setEditing(null);
           }}
-          onSaved={() => {
+          onSaved={(name) => {
+            toast.success(editing ? `${name} saved.` : `${name} added to the rail.`);
             setCreating(false);
             setEditing(null);
             refresh();
@@ -223,7 +228,8 @@ function CategoryDrawer({
   category: Category | null;
   all: Category[];
   onClose: () => void;
-  onSaved: () => void;
+  /** Passes the saved name back so the caller can confirm it by name. */
+  onSaved: (name: string) => void;
 }) {
   const [name, setName] = useState(category?.name ?? '');
   const [description, setDescription] = useState(category?.description ?? '');
@@ -265,7 +271,7 @@ function CategoryDrawer({
       } else {
         await createCategory(changes as Partial<Category>);
       }
-      onSaved();
+      onSaved(changes.name);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {

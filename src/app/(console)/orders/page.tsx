@@ -1,7 +1,7 @@
 'use client';
 
-import { AlertTriangle, LayoutGrid, RefreshCw, Rows3, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, LayoutGrid, RefreshCw, Rows3, Search, X } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { clsx } from 'clsx';
 
@@ -14,18 +14,55 @@ import {
   Panel,
   StatusBadge,
   TableSkeleton,
+  useToast,
 } from '@/components/ui';
+import { errorMessage } from '@/lib/api';
 import { dateTime, money, phone as formatPhone, relativeTime } from '@/lib/format';
-import { listOrders, listRiders } from '@/lib/queries';
+import { advanceOrder, listOrders, listRiders } from '@/lib/queries';
 import { useDebounced, usePolling, useResource } from '@/lib/use-resource';
 import type { Order, OrderStatus } from '@/types';
 
 const PAGE_SIZE = 25;
 
-/** The four live columns. Terminal states are reached through the filters. */
-const BOARD_COLUMNS: { status: OrderStatus; label: string; hint: string }[] = [
-  { status: 'Placed', label: 'New', hint: 'Waiting to be picked' },
-  { status: 'Packing', label: 'Packing', hint: 'Being assembled' },
+/**
+ * The four live columns.
+ *
+ * Terminal states are reached through the filters.
+ *
+ * `next` is the one move that is *unambiguous* from that column, offered on the
+ * card itself so the ordinary path — pick it, pack it, mark it ready — is one
+ * click rather than open-drawer, click, close-drawer. Two columns deliberately
+ * have none. Nothing forward happens by hand from **Ready**: dispatch picks the
+ * rider. And **On the way** ends in Delivered, which records the cash against
+ * the order; that one keeps the drawer, where the amount is in front of you and
+ * the failure exit sits beside it.
+ */
+const BOARD_COLUMNS: {
+  status: OrderStatus;
+  label: string;
+  hint: string;
+  next?: { status: OrderStatus; label: string; done: (order: Order) => string };
+}[] = [
+  {
+    status: 'Placed',
+    label: 'New',
+    hint: 'Waiting to be picked',
+    next: {
+      status: 'Packing',
+      label: 'Start packing',
+      done: (order) => `Order #${order.id} is being packed.`,
+    },
+  },
+  {
+    status: 'Packing',
+    label: 'Packing',
+    hint: 'Being assembled',
+    next: {
+      status: 'Ready',
+      label: 'Mark ready',
+      done: (order) => `Order #${order.id} is ready — a rider is being found for it.`,
+    },
+  },
   // A rider is picked automatically at Ready, so an order that stays in this
   // column is one dispatch could find nobody for — not one simply waiting its
   // turn. The hint says so, because the difference decides whether a manager
@@ -56,7 +93,9 @@ export default function OrdersPage() {
   const [stalledOnly, setStalledOnly] = useState(false);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [actionError, setActionError] = useState('');
 
+  const toast = useToast();
   const debouncedSearch = useDebounced(search);
 
   // The board wants every open order; the table wants a page of whatever the
@@ -92,10 +131,49 @@ export default function OrdersPage() {
   const rows = orders.data?.rows ?? [];
   const total = orders.data?.total ?? 0;
 
+  // Which filters are actually narrowing what is on screen. The board ignores
+  // the status and date boxes — they are not even rendered there — so counting
+  // them would offer to clear something invisible.
+  const activeFilters = isBoard
+    ? [search, stalledOnly ? 'stalled' : ''].filter(Boolean).length
+    : [search, status, from, to, stalledOnly ? 'stalled' : ''].filter(Boolean).length;
+
+  function clearFilters() {
+    setSearch('');
+    setStatus('');
+    setFrom('');
+    setTo('');
+    setStalledOnly(false);
+    setOffset(0);
+  }
+
   function changeView(next: View) {
     setView(next);
     setOffset(0);
   }
+
+  /**
+   * The one obvious move, taken from the card.
+   *
+   * Errors surface in the page's banner rather than on the card: a card can
+   * vanish on the next poll, and an error that disappears before it is read is
+   * worse than one shown a little further away. A 409 here is the ordinary
+   * case — somebody else moved this order first — so the server's own sentence
+   * is what gets shown.
+   */
+  const advance = useCallback(
+    async (order: Order, status: OrderStatus, done: string) => {
+      setActionError('');
+      try {
+        await advanceOrder(order.id, status);
+        toast.success(done);
+        refresh();
+      } catch (caught) {
+        setActionError(errorMessage(caught));
+      }
+    },
+    [refresh, toast],
+  );
 
   function onFilterChange<T>(setter: (value: T) => void) {
     return (value: T) => {
@@ -211,8 +289,28 @@ export default function OrdersPage() {
           />
           Stalled only
         </label>
+
+        {/* Only when there is something to clear. A permanently visible reset
+            button is one more control to read past on every visit, and the
+            screen it rescues you from — an empty table you cannot explain — is
+            the only moment anybody looks for it. */}
+        {activeFilters > 0 ? (
+          <button
+            type="button"
+            className="btn btn-ghost h-[2.125rem]"
+            onClick={clearFilters}
+          >
+            <X size={13} aria-hidden="true" />
+            Clear {activeFilters} filter{activeFilters === 1 ? '' : 's'}
+          </button>
+        ) : null}
       </div>
 
+      {actionError ? (
+        <div className="mb-4">
+          <ErrorBanner message={actionError} />
+        </div>
+      ) : null}
       {orders.error ? (
         <div className="mb-4">
           <ErrorBanner message={orders.error} onRetry={refresh} />
@@ -224,13 +322,20 @@ export default function OrdersPage() {
           <TableSkeleton />
         </Panel>
       ) : isBoard ? (
-        <Board orders={rows} onSelect={setSelected} />
+        <Board orders={rows} onSelect={setSelected} onAdvance={advance} />
       ) : (
         <Panel flush>
           {rows.length === 0 ? (
             <EmptyState
               title="No orders match those filters"
-              description="Try widening the date range or clearing the search."
+              description="Try widening the date range, or clear the filters and start again."
+              action={
+                activeFilters > 0 ? (
+                  <button type="button" className="btn btn-secondary" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                ) : null
+              }
             />
           ) : (
             <>
@@ -327,9 +432,11 @@ function ViewTab({
 function Board({
   orders,
   onSelect,
+  onAdvance,
 }: {
   orders: Order[];
   onSelect: (order: Order) => void;
+  onAdvance: (order: Order, status: OrderStatus, done: string) => Promise<void>;
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -350,7 +457,13 @@ function Board({
                 <p className="px-1 py-6 text-center text-xs text-ink-faint">Nothing here</p>
               ) : (
                 items.map((order) => (
-                  <OrderCard key={order.id} order={order} onSelect={onSelect} />
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    next={column.next}
+                    onSelect={onSelect}
+                    onAdvance={onAdvance}
+                  />
                 ))
               )}
             </div>
@@ -361,48 +474,98 @@ function Board({
   );
 }
 
+/**
+ * One order on the board.
+ *
+ * Two controls, side by side rather than nested: the card itself opens the
+ * drawer, and the strip under it takes the one obvious next step. A button
+ * cannot contain a button, and the alternatives — a click handler on a div, or
+ * a transparent button stretched over the whole card — cost either keyboard
+ * access or every native affordance inside it, including the tooltip on the
+ * elapsed time. So the card keeps being exactly what it was, and the new
+ * control sits below it.
+ */
 function OrderCard({
   order,
+  next,
   onSelect,
+  onAdvance,
 }: {
   order: Order;
+  next?: { status: OrderStatus; label: string; done: (order: Order) => string };
   onSelect: (order: Order) => void;
+  onAdvance: (order: Order, status: OrderStatus, done: string) => Promise<void>;
 }) {
+  const [busy, setBusy] = useState(false);
+
+  async function advance() {
+    if (!next) return;
+    setBusy(true);
+    try {
+      await onAdvance(order, next.status, next.done(order));
+    } finally {
+      // The card is usually gone by now — the refresh moves it to the next
+      // column — so this only matters on the path where it is not: an error,
+      // where the button has to become clickable again.
+      setBusy(false);
+    }
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(order)}
+    <div
       className={clsx(
-        'w-full rounded-[0.4rem] border bg-surface p-2.5 text-left transition-colors hover:bg-hover',
+        'rounded-[0.4rem] border bg-surface transition-colors hover:bg-hover',
         // A late order is outlined, not just badged. On a board of thirty cards
         // the one that has blown its promise has to be findable without reading.
         order.is_late ? 'border-danger' : 'border-line',
       )}
     >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="mono text-xs text-ink-faint">#{order.id}</span>
-        <span className="numeric text-sm font-semibold">{money(order.grand_total)}</span>
-      </div>
+      <button
+        type="button"
+        onClick={() => onSelect(order)}
+        className="block w-full rounded-[0.4rem] p-2.5 text-left"
+      >
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="mono text-xs text-ink-faint">#{order.id}</span>
+          <span className="numeric text-sm font-semibold">{money(order.grand_total)}</span>
+        </div>
 
-      <p className="mt-1 truncate text-sm font-medium">{order.customer_name}</p>
-      <p className="truncate text-xs text-ink-faint">{order.customer_address}</p>
+        <p className="mt-1 truncate text-sm font-medium">{order.customer_name}</p>
+        <p className="truncate text-xs text-ink-faint">{order.customer_address}</p>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {order.is_late ? (
-          <span className="badge badge-danger">
-            <AlertTriangle size={10} aria-hidden="true" />
-            Late
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {order.is_late ? (
+            <span className="badge badge-danger">
+              <AlertTriangle size={10} aria-hidden="true" />
+              Late
+            </span>
+          ) : (
+            <span className="badge badge-neutral numeric">{order.minutes_remaining} min left</span>
+          )}
+          {order.rider ? <span className="badge badge-accent">{order.rider.name}</span> : null}
+          <span className="ml-auto text-2xs text-ink-faint" title={dateTime(order.created_at)}>
+            {relativeTime(order.created_at)}
           </span>
-        ) : (
-          <span className="badge badge-neutral numeric">{order.minutes_remaining} min left</span>
-        )}
-        {order.rider ? (
-          <span className="badge badge-accent">{order.rider.name}</span>
-        ) : null}
-        <span className="ml-auto text-2xs text-ink-faint" title={dateTime(order.created_at)}>
-          {relativeTime(order.created_at)}
-        </span>
-      </div>
-    </button>
+        </div>
+      </button>
+
+      {next ? (
+        <div className="px-2.5 pb-2.5">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm w-full"
+            disabled={busy}
+            // Named in full for a screen reader. On a board of thirty cards,
+            // thirty buttons all reading "Start packing" say nothing about
+            // which order is about to move.
+            aria-label={`${next.label} — order #${order.id} for ${order.customer_name}`}
+            onClick={advance}
+          >
+            {busy ? 'Working…' : next.label}
+            <ArrowRight size={12} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }

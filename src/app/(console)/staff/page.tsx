@@ -13,6 +13,7 @@ import {
   Pagination,
   Panel,
   TableSkeleton,
+  useToast,
 } from '@/components/ui';
 import { ApiError, errorMessage } from '@/lib/api';
 import { dateOnly, phone as formatPhone } from '@/lib/format';
@@ -47,9 +48,10 @@ export default function StaffPage() {
   const [editing, setEditing] = useState<StaffUser | null>(null);
   const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState<StaffUser | null>(null);
-  const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const toast = useToast();
 
   // Memoised for the same reason as in accounts/page.tsx: `?? []` is a new
   // array each render, so an unmemoised `rows` makes the memo below pointless.
@@ -85,8 +87,14 @@ export default function StaffPage() {
       // The backend deactivates rather than deletes anyone with delivery
       // history, and says so. Passing that sentence through matters: "deleted"
       // and "deactivated, because they have delivered orders" are different
-      // outcomes and the operator should know which one happened.
-      setNotice(result.detail ?? `${removing.name} was removed.`);
+      // outcomes and the operator should know which one happened — which is
+      // why the server's own sentence goes out as `info`, the tone that stays
+      // up long enough to be read, rather than as a four-second "Done".
+      if (result.detail) {
+        toast.info(result.detail);
+      } else {
+        toast.success(`${removing.name} was removed.`);
+      }
       setRemoving(null);
       refresh();
     } catch (caught) {
@@ -132,11 +140,6 @@ export default function StaffPage() {
         </p>
       </div>
 
-      {notice ? (
-        <div className="mb-4 rounded-[0.4rem] border border-info bg-info-quiet px-3 py-2 text-sm text-info">
-          {notice}
-        </div>
-      ) : null}
       {actionError ? (
         <div className="mb-4">
           <ErrorBanner message={actionError} />
@@ -245,10 +248,10 @@ export default function StaffPage() {
             setCreating(false);
             setEditing(null);
           }}
-          onSaved={() => {
+          onSaved={(name) => {
+            toast.success(editing ? `${name} saved.` : `${name} can sign in to the rider app now.`);
             setCreating(false);
             setEditing(null);
-            setNotice('');
             refresh();
           }}
         />
@@ -275,7 +278,8 @@ function StaffDrawer({
 }: {
   person: StaffUser | null;
   onClose: () => void;
-  onSaved: () => void;
+  /** Passes the saved name back so the caller can confirm it by name. */
+  onSaved: (name: string) => void;
 }) {
   const [name, setName] = useState(person?.name ?? '');
   const [role, setRole] = useState<StaffUser['role']>(person?.role ?? 'delivery');
@@ -320,7 +324,7 @@ function StaffDrawer({
       } else {
         await createStaff(body);
       }
-      onSaved();
+      onSaved(name.trim());
     } catch (caught) {
       if (caught instanceof ApiError) {
         const fields = caught.fieldErrors;

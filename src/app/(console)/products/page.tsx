@@ -13,6 +13,7 @@ import {
   Panel,
   StockBadge,
   TableSkeleton,
+  useToast,
 } from '@/components/ui';
 import { assetUrl, errorMessage } from '@/lib/api';
 import { count, marginPercent, money } from '@/lib/format';
@@ -35,6 +36,7 @@ export default function ProductsPage() {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const toast = useToast();
   const debouncedSearch = useDebounced(search);
 
   const filters = useMemo(
@@ -62,6 +64,19 @@ export default function ProductsPage() {
   const rows = products.data?.rows ?? [];
   const total = products.data?.total ?? 0;
 
+  // Four boxes narrow this table and three of them are dropdowns, which is
+  // exactly the shape of filter that gets left set from yesterday and then
+  // explains an empty screen nobody can account for.
+  const activeFilters = [search, category, status, stock].filter(Boolean).length;
+
+  function clearFilters() {
+    setSearch('');
+    setCategory('');
+    setStatus('');
+    setStock('');
+    setOffset(0);
+  }
+
   function filtered<T>(setter: (value: T) => void) {
     return (value: T) => {
       setter(value);
@@ -75,6 +90,7 @@ export default function ProductsPage() {
     setActionError('');
     try {
       await deleteProduct(deleting.id);
+      toast.success(`${deleting.name} deleted.`);
       setDeleting(null);
       refresh();
     } catch (caught) {
@@ -175,6 +191,14 @@ export default function ProductsPage() {
             <option value="inactive">Inactive</option>
           </select>
         </div>
+
+        {/* Shown only when something is set. Nothing to clear, nothing to read. */}
+        {activeFilters > 0 ? (
+          <button type="button" className="btn btn-ghost h-[2.125rem]" onClick={clearFilters}>
+            <X size={13} aria-hidden="true" />
+            Clear {activeFilters} filter{activeFilters === 1 ? '' : 's'}
+          </button>
+        ) : null}
       </div>
 
       {actionError ? (
@@ -193,24 +217,30 @@ export default function ProductsPage() {
           <TableSkeleton columns={6} />
         ) : rows.length === 0 ? (
           <EmptyState
-            title={debouncedSearch || category || stock ? 'Nothing matches' : 'No products yet'}
+            title={activeFilters > 0 ? 'Nothing matches' : 'No products yet'}
             description={
-              debouncedSearch || category || stock
-                ? 'Try clearing the filters.'
+              activeFilters > 0
+                ? 'The catalogue is not empty — these filters are hiding all of it.'
                 : 'Add your first product and it appears in the storefront immediately.'
             }
             action={
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setEditing(null);
-                  setDrawerOpen(true);
-                }}
-              >
-                <Plus size={14} aria-hidden="true" />
-                New product
-              </button>
+              activeFilters > 0 ? (
+                <button type="button" className="btn btn-secondary" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setEditing(null);
+                    setDrawerOpen(true);
+                  }}
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  New product
+                </button>
+              )
             }
           />
         ) : (
@@ -240,6 +270,7 @@ export default function ProductsPage() {
                       onDelete={() => setDeleting(product)}
                       onSaved={refresh}
                       onError={setActionError}
+                      onSuccess={toast.success}
                     />
                   ))}
                 </tbody>
@@ -262,8 +293,20 @@ export default function ProductsPage() {
           product={editing}
           categories={categories.data?.rows ?? []}
           onClose={() => setDrawerOpen(false)}
-          onSaved={() => {
+          onSaved={(result) => {
             setDrawerOpen(false);
+            if (!result.changed) {
+              // The form found nothing to write. Saying so is the point: a
+              // drawer that shuts in silence looks identical whether it saved
+              // or decided there was nothing to save.
+              toast.info(`Nothing changed on ${result.name}.`);
+            } else {
+              toast.success(
+                result.created
+                  ? `${result.name} added — it is on the storefront now.`
+                  : `${result.name} saved.`,
+              );
+            }
             refresh();
           }}
         />
@@ -289,12 +332,14 @@ function ProductRow({
   onDelete,
   onSaved,
   onError,
+  onSuccess,
 }: {
   product: Product;
   onEdit: () => void;
   onDelete: () => void;
   onSaved: () => void;
   onError: (message: string) => void;
+  onSuccess: (message: string) => void;
 }) {
   const margin = marginPercent(product.price, product.cost_price);
 
@@ -343,7 +388,12 @@ function ProductRow({
       <td className="num text-ink-soft">{margin === null ? '—' : `${margin.toFixed(0)}%`}</td>
 
       <td className="num">
-        <StockCell product={product} onSaved={onSaved} onError={onError} />
+        <StockCell
+          product={product}
+          onSaved={onSaved}
+          onError={onError}
+          onSuccess={onSuccess}
+        />
       </td>
 
       <td>
@@ -384,10 +434,12 @@ function StockCell({
   product,
   onSaved,
   onError,
+  onSuccess,
 }: {
   product: Product;
   onSaved: () => void;
   onError: (message: string) => void;
+  onSuccess: (message: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(product.stock));
@@ -406,6 +458,11 @@ function StockCell({
     setSaving(true);
     try {
       await updateProduct(product.id, { stock: next } as Partial<Product>);
+      // Named, because this is the one edit made without opening anything: the
+      // cell goes back to looking exactly like the cell beside it, and on a
+      // table of twenty-five rows there is otherwise nothing to say which
+      // number was the one that took.
+      onSuccess(`${product.name}: ${count(next)} in stock.`);
       setEditing(false);
       onSaved();
     } catch (caught) {

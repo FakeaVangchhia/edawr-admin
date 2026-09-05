@@ -165,5 +165,13 @@ and the CSP names `/api/csp-report`. Both endpoints allowlist every field they
 log — an endpoint that logged whatever arrived would be a PII sink. Every
 reporter is written so it cannot throw and cannot block; it runs at the moment
 the app is already failing.
+- **Successes are toasts; failures stay inline.** Every write confirms itself
+through `useToast()` (`src/components/ui/toast.tsx`), mounted once in
+`(console)/layout.tsx`. Errors keep using `ErrorBanner` where they are: a
+confirmation is glanced at and let go, an error has to be read and acted on,
+and a 409 that vanishes after four seconds is a 409 nobody saw. Word the
+confirmation as the *consequence* — "Order #12 delivered, ₹340 recorded as
+collected", not "Saved" — because the side effects of these writes (stock
+moving, cash being recorded) are invisible on the screen that made them.
 - **Do not run** `git push`**.** Stage and commit; leave pushing to the user.
 
