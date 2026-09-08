@@ -87,6 +87,16 @@ function LoginForm() {
     <main className="flex min-h-dvh items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element -- a 48px local
+              asset; next/image would add a round trip and nothing else. */}
+          <img
+            src="/edawr-mark-512.png"
+            alt=""
+            width={48}
+            height={48}
+            className="mx-auto mb-3 size-12 rounded-xl"
+            aria-hidden="true"
+          />
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
             eDawr
           </p>

@@ -212,7 +212,7 @@ export default function OverviewPage() {
             description="Every order placed so far has been delivered or cancelled."
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Live orders table">
             <table className="table">
               <thead>
                 <tr>

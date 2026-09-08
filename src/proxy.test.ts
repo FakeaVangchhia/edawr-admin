@@ -16,10 +16,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const API = 'https://api.edawr.test';
+const MEDIA = 'https://pub-test.r2.dev';
 
-async function headersFor(apiUrl: string | undefined, nodeEnv = 'production') {
+async function headersFor(
+  apiUrl: string | undefined,
+  nodeEnv = 'production',
+  mediaUrl = '',
+) {
   vi.resetModules();
   vi.stubEnv('NEXT_PUBLIC_API_URL', apiUrl ?? '');
+  vi.stubEnv('NEXT_PUBLIC_MEDIA_URL', mediaUrl);
   vi.stubEnv('NODE_ENV', nodeEnv);
 
   const { proxy } = await import('@/proxy');
@@ -52,6 +58,30 @@ describe('the console CSP', () => {
     expect(d['connect-src']).toContain(API);
     // Product images appear in the product drawer and the order drawer.
     expect(d['img-src']).toContain(API);
+  });
+
+  it('names the media origin in img-src when images live elsewhere', async () => {
+    // Product images are in a Cloudflare R2 bucket, not on the API host. Miss
+    // this and every image in the console is blocked by the browser, with
+    // nothing in a deploy log, a health check or an error report to say so.
+    const d = directives(
+      (await headersFor(API, 'production', MEDIA)).get('Content-Security-Policy') ?? '',
+    );
+
+    expect(d['img-src']).toContain(MEDIA);
+    expect(d['img-src']).toContain(API);
+    // Images are <img> fetches, not fetch() calls: the bucket has no business
+    // in connect-src, and putting it there would widen the policy for nothing.
+    expect(d['connect-src']).not.toContain(MEDIA);
+  });
+
+  it('does not repeat the API origin when images are served from it', async () => {
+    // UPLOAD_BACKEND=local, the un-migrated case: Django serves /uploads itself.
+    const d = directives(
+      (await headersFor(API, 'production', API)).get('Content-Security-Policy') ?? '',
+    );
+
+    expect(d['img-src'].match(new RegExp(API, 'g'))).toHaveLength(1);
   });
 
   it('carries a nonce, which the theme bootstrap depends on', async () => {

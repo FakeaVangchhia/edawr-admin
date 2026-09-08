@@ -122,7 +122,11 @@ field resets it.
 - URLs carry **no trailing slash** — the API sets `APPEND_SLASH = False`, because
 a redirected POST loses its body.
 - Uploads return a **relative** `/uploads/<name>` path; prefix it via
-`assetUrl()`.
+`assetUrl()`. That path is also the object key in the Cloudflare R2 bucket the
+images live in, which is why it never changed when they moved off the API's
+disk. `assetUrl()` prefixes `NEXT_PUBLIC_MEDIA_URL`, falling back to
+`NEXT_PUBLIC_API_URL` when it is unset — correct while the backend runs
+`UPLOAD_BACKEND=local`.
 
 
 
@@ -141,9 +145,10 @@ hydrates. **It only breaks in** `next build`; `next dev` renders per request,
 so it is invisible locally and appears first on the deployed site. CI fails the
 build if any route prerenders.
 - **The CSP names the API origin.** `src/proxy.ts` derives `connect-src` and
-`img-src` from `NEXT_PUBLIC_API_URL`. Get that wrong and the browser blocks
-every request and every product image, and the console renders empty. It is the
-first thing to check when nothing loads.
+`img-src` from `NEXT_PUBLIC_API_URL`, and adds `NEXT_PUBLIC_MEDIA_URL` to
+`img-src` when the images are somewhere else. Get either wrong and the browser
+blocks every request or every product image, and the console renders empty with
+nothing in any server log. It is the first thing to check when nothing loads.
 - `params` in a dynamic route is a **Promise** and must be awaited.
 - Turbopack is the default for `dev` and `build`.
 - **Never set state synchronously inside an effect.**

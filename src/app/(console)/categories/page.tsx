@@ -105,7 +105,7 @@ export default function CategoriesPage() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Categories table">
             <table className="table">
               <thead>
                 <tr>

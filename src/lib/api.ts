@@ -41,12 +41,39 @@ export const apiUrl = (path: string): string => {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 };
 
+
 /**
- * Product and category images are stored as relative paths ("/uploads/x.png")
- * so the hostname is never baked into the database. This puts it back.
+ * Where product images are read from. Unset, they resolve against the API,
+ * which is correct while the backend runs UPLOAD_BACKEND=local — so a
+ * developer needs no new configuration and an un-migrated deployment keeps
+ * working.
+ *
+ * `src/proxy.ts` names this same origin in the CSP's `img-src`. Get it wrong
+ * and the browser blocks every product image with nothing in any server log.
  */
-export const assetUrl = (path: string | null | undefined): string =>
-  path ? apiUrl(path) : '';
+const MEDIA_BASE_URL =
+  (process.env.NEXT_PUBLIC_MEDIA_URL || '').trim().replace(/\/+$/, '') || API_BASE_URL;
+
+/**
+ * Product and category images are stored as relative paths ("/uploads/x.png"),
+ * so the hostname is never baked into the database. This puts one back.
+ *
+ * **Which host is the question this answers.** The API used to serve the files
+ * itself off a mounted disk; they now live in a Cloudflare R2 bucket, and the
+ * browser fetches them straight from it. The stored path did not change — the
+ * R2 object key is that same path without its leading slash — so the whole
+ * migration lands here, in which base gets prefixed.
+ *
+ * Absolute values pass through untouched: seeded placeholders on someone
+ * else's CDN still work, and so would a future where the API returns whole
+ * URLs.
+ */
+export const assetUrl = (path: string | null | undefined): string => {
+  if (!path) return '';
+  if (isAbsoluteUrl(path)) return path;
+  if (!MEDIA_BASE_URL) return path;
+  return `${MEDIA_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+};
 
 /* -------------------------------------------------------------------------- */
 

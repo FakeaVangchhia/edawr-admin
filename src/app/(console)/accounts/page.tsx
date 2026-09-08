@@ -165,7 +165,14 @@ function Accounts() {
         {accounts.loading && !accounts.data ? (
           <TableSkeleton columns={5} />
         ) : (
-          <div className="overflow-x-auto">
+          /* `tabIndex` and a named region, because a wide table scrolls
+              sideways and a plain `div` with `overflow-x-auto` cannot be
+              reached from the keyboard in Safari or Firefox. Every column
+              past the fold was then unreachable for anyone working this
+              console without a mouse — which, behind a counter, is a real
+              way to use it. Naming the region also stops a screen reader
+              announcing an anonymous scrollable box. */
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Console accounts table">
             <table className="table">
               <thead>
                 <tr>

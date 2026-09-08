@@ -68,6 +68,26 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
 
   /**
+   * Escape closes the mobile drawer.
+   *
+   * It is a fixed overlay with a backdrop, which is a dialog in everything but
+   * name, and Escape is how one is dismissed. Without it the only way out was
+   * to hit the backdrop or the small × — fine with a mouse, awkward one-handed
+   * on a phone behind the counter, and impossible from the keyboard.
+   *
+   * Bound only while open, so nothing listens on the overwhelmingly common
+   * case of a desktop console with no drawer at all.
+   */
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
+
+  /**
    * Give the API client a way to bounce an expired session to the login page.
    *
    * Registered here, once, rather than passed to every call — the alternative
@@ -206,19 +226,47 @@ function Sidebar({
   onNavigate: () => void;
 }) {
   return (
+    /*
+      `invisible` when closed, not merely translated off-screen.
+
+      A transform moves the drawer out of sight and changes nothing else: every
+      one of these ten links stayed in the tab order and in the accessibility
+      tree. On a phone, tabbing from the top bar walked through a full set of
+      navigation the operator could not see, and a screen reader read out a menu
+      that was not open.
+
+      `visibility: hidden` removes it from both, and unlike `display: none` it
+      still animates — the slide-out plays, then the drawer goes inert at the
+      end of it. `lg:visible` keeps the desktop sidebar, which is `lg:static`
+      and never "closed", entirely unaffected.
+    */
     <nav
       aria-label="Console sections"
       className={clsx(
-        'fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-line bg-surface transition-transform lg:static lg:translate-x-0',
-        open ? 'translate-x-0' : '-translate-x-full',
+        'fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-line bg-surface transition-[transform,visibility] lg:static lg:visible lg:translate-x-0',
+        open ? 'visible translate-x-0' : 'invisible -translate-x-full',
       )}
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <div>
-          <p className="text-2xs font-semibold uppercase tracking-[0.18em] text-accent">
-            eDawr
-          </p>
-          <p className="text-sm font-semibold">Console</p>
+        <div className="flex items-center gap-2.5">
+          {/* The eDawr mark, generated from the one master logo by
+              edawr-frontend/scripts/generate-brand-assets.mjs. eslint-disable
+              because next/image buys nothing for a 28px local asset. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/edawr-mark-512.png"
+            alt=""
+            width={28}
+            height={28}
+            className="size-7 shrink-0 rounded-lg"
+            aria-hidden="true"
+          />
+          <div>
+            <p className="text-2xs font-semibold uppercase tracking-[0.18em] text-accent">
+              eDawr
+            </p>
+            <p className="text-sm font-semibold">Console</p>
+          </div>
         </div>
         <button
           type="button"

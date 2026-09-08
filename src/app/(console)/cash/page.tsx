@@ -134,7 +134,7 @@ export default function CashPage() {
               description="Deliveries in this window will appear here with what each rider took."
             />
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Cash by rider table">
               <table className="table">
                 <thead>
                   <tr>
@@ -182,7 +182,7 @@ export default function CashPage() {
           ) : (data?.days.length ?? 0) === 0 ? (
             <EmptyState title="No deliveries in this window" />
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Cash by day table">
               <table className="table">
                 <thead>
                   <tr>

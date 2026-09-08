@@ -62,7 +62,7 @@ export function RiderLocationPanel({ className }: { className?: string }) {
           description="Nobody is on the roster yet, so there is nothing to track."
         />
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Active riders table">
           <table className="table">
             <thead>
               <tr>

@@ -32,10 +32,31 @@ function apiOrigin(): string {
   }
 }
 
+/**
+ * Where product images are read from. Must be named in `img-src` or the
+ * browser blocks every one of them.
+ *
+ * Empty when unset, and empty when it is the same origin as the API — in which
+ * case `api` already covers it and repeating it only makes the header longer.
+ * That is the un-migrated case: with UPLOAD_BACKEND=local the Django API still
+ * serves /uploads itself.
+ */
+function mediaOrigin(api: string): string {
+  const raw = (process.env.NEXT_PUBLIC_MEDIA_URL || '').trim();
+  if (!raw) return '';
+  try {
+    const origin = new URL(raw).origin;
+    return origin === api ? '' : origin;
+  } catch {
+    return '';
+  }
+}
+
 export function proxy(request: NextRequest) {
   const isDev = process.env.NODE_ENV === 'development';
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const api = apiOrigin();
+  const media = mediaOrigin(api);
 
   /**
    * Where the browser posts a violation. Same reasoning as the storefront's
@@ -70,8 +91,10 @@ export function proxy(request: NextRequest) {
     // next/font self-hosts its files, so no external font origin is needed.
     "font-src 'self' data:",
 
-    // Product images are served by the Django backend.
-    `img-src 'self' blob: data:${api ? ` ${api}` : ''}`,
+    // Product images. `api` because the backend still serves /uploads when
+    // UPLOAD_BACKEND=local; `media` because it does not when the images are in
+    // Cloudflare R2 and the browser fetches them from there.
+    `img-src 'self' blob: data:${api ? ` ${api}` : ''}${media ? ` ${media}` : ''}`,
 
     // Where the app is allowed to talk to. Without the API origin here, every
     // fetch in the console fails.
@@ -111,18 +134,20 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   /**
-   * Skip Next's own static output and the icon/manifest assets. Those are
-   * immutable files served straight from disk; running this on each of them
-   * costs a function invocation and buys nothing, and a nonce on a cached asset
-   * is meaningless.
+   * Skip Next's own static output and the icon assets. Those are immutable
+   * files served straight from disk; running this on each of them costs a
+   * function invocation and buys nothing, and a nonce on a cached asset is
+   * meaningless.
    *
-   * `manifest-src` is deliberately absent from the policy above — it falls back
-   * to `default-src 'self'`, which is already correct.
+   * The console has no web manifest, deliberately — it is `noindex` and is not
+   * something anyone installs to a home screen. `favicon.ico`, `icon.png` and
+   * `apple-icon.png` are the App Router metadata files in `src/app/`, which
+   * Next serves at exactly those paths.
    */
   matcher: [
     {
       source:
-        '/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest).*)',
+        '/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },
