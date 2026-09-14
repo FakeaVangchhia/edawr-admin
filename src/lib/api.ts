@@ -238,8 +238,10 @@ async function attempt(
         ? String((payload as { detail: unknown }).detail)
         : '') || `Request failed (${response.status}).`;
 
-    // The interceptor. Note the narrowness: 401 only.
-    if (response.status === 401) {
+    // The interceptor. Note the narrowness: a 401 to a request that sent a
+    // token means the token is dead. A 401 to the login form is a wrong
+    // password, and there is no session to end.
+    if (response.status === 401 && headers.has('Authorization')) {
       clearSession();
       onSessionExpired?.();
     }

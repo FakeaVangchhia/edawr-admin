@@ -5,6 +5,7 @@ import {
   NetworkError,
   authPage,
   authRequest,
+  publicRequest,
   setSessionExpiredHandler,
 } from '@/lib/api';
 import { SESSION_KEY, readSession, writeSession } from '@/lib/session';
@@ -110,6 +111,22 @@ describe('authRequest', () => {
 
       expect(readSession()).toBeNull();
       expect(expired).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the session on a 401 to the login form', async () => {
+      // A wrong password is a 401 with no token attached. Nothing about the
+      // session that already exists is being retired, and a "session expired"
+      // notice over a mistyped password would be a lie.
+      const expired = vi.fn();
+      setSessionExpiredHandler(expired);
+      fetchMock.mockImplementation(failure(401, 'Incorrect email or password.'));
+
+      await expect(
+        settle(publicRequest('/api/auth/login', { method: 'POST', body: {} })),
+      ).rejects.toBeInstanceOf(ApiError);
+
+      expect(readSession()).not.toBeNull();
+      expect(expired).not.toHaveBeenCalled();
     });
 
     it('keeps the session on 403', async () => {
