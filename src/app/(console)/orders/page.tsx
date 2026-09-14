@@ -1,7 +1,8 @@
 'use client';
 
 import { AlertTriangle, ArrowRight, LayoutGrid, RefreshCw, Rows3, Search, X } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 
 import { clsx } from 'clsx';
 
@@ -19,6 +20,7 @@ import {
 import { errorMessage } from '@/lib/api';
 import { dateTime, money, phone as formatPhone, relativeTime } from '@/lib/format';
 import { advanceOrder, listOrders, listRiders } from '@/lib/queries';
+import { MARK_READY, START_PACKING, type OrderStep } from '@/lib/order-steps';
 import { useDebounced, usePolling, useResource } from '@/lib/use-resource';
 import type { Order, OrderStatus } from '@/types';
 
@@ -41,28 +43,10 @@ const BOARD_COLUMNS: {
   status: OrderStatus;
   label: string;
   hint: string;
-  next?: { status: OrderStatus; label: string; done: (order: Order) => string };
+  next?: OrderStep;
 }[] = [
-  {
-    status: 'Placed',
-    label: 'New',
-    hint: 'Waiting to be picked',
-    next: {
-      status: 'Packing',
-      label: 'Start packing',
-      done: (order) => `Order #${order.id} is being packed.`,
-    },
-  },
-  {
-    status: 'Packing',
-    label: 'Packing',
-    hint: 'Being assembled',
-    next: {
-      status: 'Ready',
-      label: 'Mark ready',
-      done: (order) => `Order #${order.id} is ready — a rider is being found for it.`,
-    },
-  },
+  { status: 'Placed', label: 'New', hint: 'Waiting to be picked', next: START_PACKING },
+  { status: 'Packing', label: 'Packing', hint: 'Being assembled', next: MARK_READY },
   // A rider is picked automatically at Ready, so an order that stays in this
   // column is one dispatch could find nobody for — not one simply waiting its
   // turn. The hint says so, because the difference decides whether a manager
@@ -85,8 +69,22 @@ const STATUS_OPTIONS: (OrderStatus | '')[] = [
 type View = 'board' | 'table';
 
 export default function OrdersPage() {
-  const [view, setView] = useState<View>('board');
-  const [search, setSearch] = useState('');
+  // `useSearchParams` needs a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={null}>
+      <OrdersScreen />
+    </Suspense>
+  );
+}
+
+function OrdersScreen() {
+  // `?q=` is how the rider map deep-links to one order. It arrives in the
+  // table view, where a search over every order makes sense; the board only
+  // shows open ones. Read once into state: from then on the box is the user's.
+  const params = useSearchParams();
+  const initialQuery = params.get('q') ?? '';
+  const [view, setView] = useState<View>(initialQuery ? 'table' : 'board');
+  const [search, setSearch] = useState(initialQuery);
   const [status, setStatus] = useState<OrderStatus | ''>('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -395,7 +393,10 @@ export default function OrdersPage() {
         </Panel>
       )}
 
+      {/* Keyed on the order, so a rider picked or an error shown for one
+          order is not still there when the next one opens. */}
       <OrderDrawer
+        key={selected?.id ?? 'none'}
         order={selected}
         riders={riders.data ?? []}
         onClose={() => setSelected(null)}
@@ -499,7 +500,7 @@ function OrderCard({
   onAdvance,
 }: {
   order: Order;
-  next?: { status: OrderStatus; label: string; done: (order: Order) => string };
+  next?: OrderStep;
   onSelect: (order: Order) => void;
   onAdvance: (order: Order, status: OrderStatus, done: string) => Promise<void>;
 }) {

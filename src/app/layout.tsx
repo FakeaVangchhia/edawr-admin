@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
-import { connection } from 'next/server';
+import { headers } from 'next/headers';
 import { Analytics } from '@vercel/analytics/next';
 
 import './globals.css';
@@ -58,8 +58,10 @@ export const viewport: Viewport = {
  *
  * This has to be inline and synchronous: anything deferred runs after the
  * browser has already painted, and someone who chose dark sees a white flash
- * before it applies. It is nonce-carrying, which is why it satisfies the strict
- * CSP in `proxy.ts`, and it is the only inline script in the app.
+ * before it applies. It is the only inline script in the app, and it carries
+ * the per-request nonce from `proxy.ts` — without that attribute the strict
+ * CSP blocks it silently, dark never applies on load, and every page view
+ * files a violation report.
  *
  * It writes `data-theme` only for a stored *dark* choice. No attribute means
  * light, which is the console's default — so for everyone who has never opened
@@ -78,17 +80,18 @@ const THEME_BOOTSTRAP = `
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  // Forces every route to render per request. This is load-bearing, not
-  // ceremony: `proxy.ts` issues a fresh CSP nonce per request, and a statically
-  // prerendered page would ship HTML whose script tags carry a nonce from build
-  // time. The browser would reject every one of them and the app would never
-  // hydrate — a blank page with a console full of CSP violations.
-  await connection();
+  // Reading a request header forces every route to render per request, and
+  // that is load-bearing, not ceremony: `proxy.ts` issues a fresh CSP nonce per
+  // request, and a statically prerendered page would ship HTML whose script
+  // tags carry a nonce from build time. The browser would reject every one of
+  // them and the app would never hydrate — a blank page with a console full of
+  // CSP violations. The same header supplies the nonce for the script below.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
       <body className={`${inter.variable} ${mono.variable} antialiased`}>
         {children}

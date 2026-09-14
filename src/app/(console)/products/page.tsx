@@ -1,13 +1,15 @@
 'use client';
 
 import { Check, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useMemo, useState } from 'react';
 
 import { ProductDrawer } from '@/components/products/ProductDrawer';
 import {
   ConfirmDialog,
   EmptyState,
   ErrorBanner,
+  ResourceErrors,
   PageHeader,
   Pagination,
   Panel,
@@ -23,11 +25,28 @@ import type { Product } from '@/types';
 
 const PAGE_SIZE = 25;
 
+type StockFilter = '' | 'low' | 'out';
+
 export default function ProductsPage() {
+  // `useSearchParams` needs a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={null}>
+      <ProductsScreen />
+    </Suspense>
+  );
+}
+
+function ProductsScreen() {
+  // `?stock=out|low` is how the overview's inventory tiles deep-link here.
+  // Read once into state: the filter is then the user's to change.
+  const params = useSearchParams();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
-  const [stock, setStock] = useState<'' | 'low' | 'out'>('');
+  const [stock, setStock] = useState<StockFilter>(() => {
+    const wanted = params.get('stock');
+    return wanted === 'low' || wanted === 'out' ? wanted : '';
+  });
   const [offset, setOffset] = useState(0);
 
   const [editing, setEditing] = useState<Product | null>(null);
@@ -59,7 +78,8 @@ export default function ProductsPage() {
     listCategories({ limit: 200 }, signal),
   );
 
-  const refresh = useCallback(() => products.refresh(), [products]);
+  // `refresh` is stable across renders (see use-resource.ts), so no wrapper.
+  const refresh = products.refresh;
 
   const rows = products.data?.rows ?? [];
   const total = products.data?.total ?? 0;
@@ -206,11 +226,7 @@ export default function ProductsPage() {
           <ErrorBanner message={actionError} />
         </div>
       ) : null}
-      {products.error ? (
-        <div className="mb-4">
-          <ErrorBanner message={products.error} onRetry={refresh} />
-        </div>
-      ) : null}
+      <ResourceErrors resources={[products, categories]} />
 
       <Panel flush>
         {products.loading && !products.data ? (
@@ -453,9 +469,15 @@ function StockCell({
   const [saving, setSaving] = useState(false);
 
   async function save() {
+    // `Number('')` is 0, so an emptied box would silently write out the whole
+    // shelf. Blank means "I changed my mind", not "none left".
+    if (value.trim() === '') {
+      setEditing(false);
+      return;
+    }
     const next = Number(value);
-    if (!Number.isFinite(next) || next < 0) {
-      onError('Stock must be zero or more.');
+    if (!Number.isInteger(next) || next < 0) {
+      onError('Stock must be a whole number, zero or more.');
       return;
     }
     if (next === product.stock) {
@@ -464,7 +486,7 @@ function StockCell({
     }
     setSaving(true);
     try {
-      await updateProduct(product.id, { stock: next } as Partial<Product>);
+      await updateProduct(product.id, { stock: next });
       // Named, because this is the one edit made without opening anything: the
       // cell goes back to looking exactly like the cell beside it, and on a
       // table of twenty-five rows there is otherwise nothing to say which

@@ -7,83 +7,8 @@ import { ConfirmDialog, Drawer, ErrorBanner, StatusBadge, useToast } from '@/com
 import { errorMessage } from '@/lib/api';
 import { advanceOrder, assignOrder, restockOrder } from '@/lib/queries';
 import { dateTime, minutes, money, phone as formatPhone } from '@/lib/format';
-import type { Order, OrderStatus, StaffUser } from '@/types';
-
-/**
- * The moves a manager may request from each state.
- *
- * Mirrors `Order.TRANSITIONS` on the backend intersected with `ADMIN_TARGETS`,
- * and the backend re-checks both — this is here so the console offers only
- * buttons that will work, not so it can decide. An illegal move returns 409.
- *
- * Note `Dispatched` still offers no *cancel*, and that remains correct: the
- * goods have left the building, and cancelling restores stock under a lock.
- * What it now offers instead is **Delivery failed** — the exit that was missing.
- * Until it existed, a customer who refused the bag, an address nobody answered
- * and a stolen bike all had the same only button, "Mark delivered", so the
- * goods were recorded as sold and paid for and the stock never came back.
- *
- * `Failed` is terminal and moves no stock by itself. Returning the units is the
- * separate `Return stock to shelf` action below, taken when the rider is
- * actually back — see `restockOrder`.
- */
-interface Step {
-  status: OrderStatus;
-  label: string;
-  /**
-   * What the operator is told once it lands — and it names the side effect
-   * rather than repeating the button. Every one of these moves does something
-   * to stock or to money that is invisible on this screen: marking an order
-   * delivered records the cash, cancelling puts the units back, failing does
-   * not. "Saved" would be true and useless.
-   */
-  done: (order: Order) => string;
-}
-
-const NEXT_STEPS: Record<OrderStatus, Step[]> = {
-  Placed: [
-    {
-      status: 'Packing',
-      label: 'Start packing',
-      done: (order) => `Order #${order.id} is being packed.`,
-    },
-  ],
-  Packing: [
-    {
-      status: 'Ready',
-      label: 'Mark ready',
-      done: (order) => `Order #${order.id} is ready — a rider is being found for it.`,
-    },
-  ],
-  Ready: [
-    {
-      status: 'Packing',
-      label: 'Back to packing',
-      done: (order) => `Order #${order.id} is back in packing.`,
-    },
-  ],
-  Dispatched: [
-    {
-      status: 'Delivered',
-      label: 'Mark delivered',
-      done: (order) =>
-        `Order #${order.id} delivered. ${money(order.grand_total)} recorded as collected.`,
-    },
-    {
-      status: 'Ready',
-      label: 'Return to pool',
-      done: (order) => `Order #${order.id} is back in the pool for another rider.`,
-    },
-  ],
-  Delivered: [],
-  Cancelled: [],
-  Failed: [],
-};
-
-const CANCELLABLE: OrderStatus[] = ['Placed', 'Packing', 'Ready'];
-
-/** Where a delivery can fail. Only from the rider's hands. */
-const FAILABLE: OrderStatus[] = ['Dispatched'];
+import { CANCELLABLE, FAILABLE, NEXT_STEPS, TERMINAL } from '@/lib/order-steps';
+import type { Order, StaffUser } from '@/types';
 
 export function OrderDrawer({
   order,
@@ -149,7 +74,7 @@ export function OrderDrawer({
     }
   }
 
-  const steps = NEXT_STEPS[order.status] ?? [];
+  const steps = NEXT_STEPS[order.status];
   const canCancel = CANCELLABLE.includes(order.status);
   const canFail = FAILABLE.includes(order.status);
   // A failed order whose goods are not yet back on the shelf. This is the
@@ -347,7 +272,7 @@ export function OrderDrawer({
                 it — and an order that is Ready with nobody on it means
                 automatic dispatch found no candidate, which is the one state a
                 manager has to act on. */}
-            {order.status !== 'Cancelled' && order.status !== 'Delivered' ? (
+            {!TERMINAL.includes(order.status) ? (
               <div className="mt-3 border-t border-line pt-3">
                 {!order.rider && order.status === 'Ready' ? (
                   <p className="mb-2 rounded-[0.3rem] border border-danger bg-danger-quiet px-2 py-1.5 text-xs text-danger">

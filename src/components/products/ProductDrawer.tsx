@@ -1,12 +1,12 @@
 'use client';
 
-import { Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
 import { Drawer, ErrorBanner, Field } from '@/components/ui';
-import { ApiError, assetUrl, errorMessage } from '@/lib/api';
+import { ImageField } from '@/components/ui/ImageField';
+import { ApiError, errorMessage } from '@/lib/api';
 import { marginPercent } from '@/lib/format';
-import { createProduct, updateProduct, uploadProductImage } from '@/lib/queries';
+import { createProduct, updateProduct } from '@/lib/queries';
 import type { Category, Product } from '@/types';
 
 /**
@@ -102,7 +102,6 @@ export function ProductDrawer({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   // Re-seed when the drawer is opened for a different product. Keyed remounting
   // in the parent would also work; this keeps the parent simpler.
@@ -137,18 +136,6 @@ export function ProductDrawer({
     }
     setFieldErrors(problems);
     return Object.keys(problems).length === 0;
-  }
-
-  async function onUpload(file: File) {
-    setUploading(true);
-    setError('');
-    try {
-      set('image_url')(await uploadProductImage(file));
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setUploading(false);
-    }
   }
 
   async function onSubmit(event: React.FormEvent) {
@@ -235,8 +222,15 @@ export function ProductDrawer({
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" form="product-form" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : product ? 'Save changes' : 'Create product'}
+          {/* Held while an image is uploading: saving mid-upload would write the
+              row with the previous picture and lose the one on its way. */}
+          <button
+            type="submit"
+            form="product-form"
+            className="btn btn-primary"
+            disabled={saving || uploading}
+          >
+            {saving ? 'Saving…' : uploading ? 'Uploading…' : product ? 'Save changes' : 'Create product'}
           </button>
         </>
       }
@@ -398,57 +392,13 @@ export function ProductDrawer({
         </Section>
 
         <Section title="Image">
-          <div className="flex items-center gap-3">
-            {form.image_url ? (
-              /* Plain <img>, not next/image: the image host comes from
-                 NEXT_PUBLIC_API_URL and is only known at runtime, so
-                 `images.remotePatterns` cannot be configured at build time
-                 without baking the hostname into the bundle. */
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={assetUrl(form.image_url)}
-                alt=""
-                className="h-16 w-16 rounded-[0.4rem] border border-line object-cover"
-              />
-            ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-[0.4rem] border border-dashed border-line text-2xs text-ink-faint">
-                None
-              </div>
-            )}
-
-            <div className="flex flex-col gap-1.5">
-              <input
-                ref={fileInput}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) onUpload(file);
-                  event.target.value = '';
-                }}
-              />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => fileInput.current?.click()}
-                disabled={uploading}
-              >
-                <Upload size={13} aria-hidden="true" />
-                {uploading ? 'Uploading…' : 'Upload image'}
-              </button>
-              {form.image_url ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => set('image_url')('')}
-                >
-                  Remove
-                </button>
-              ) : null}
-              <p className="text-2xs text-ink-faint">JPEG, PNG, WebP or GIF, up to 5 MB.</p>
-            </div>
-          </div>
+          <ImageField
+            label="Product image"
+            value={form.image_url}
+            onChange={set('image_url')}
+            onError={setError}
+            onBusy={setUploading}
+          />
         </Section>
 
         <Section title="Supply and description">

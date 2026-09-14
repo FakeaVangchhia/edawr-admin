@@ -2,6 +2,8 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 
+import { storageGet, storageRemove, storageSet } from '@/lib/storage';
+
 export type ThemePreference = 'light' | 'dark';
 
 const THEME_KEY = 'edawr-console-theme';
@@ -48,10 +50,9 @@ function subscribe(listener: () => void): () => void {
 }
 
 function getSnapshot(): ThemePreference {
-  if (typeof window === 'undefined') return 'light';
   // Anything that is not exactly 'dark' is light, which also quietly retires
   // the 'system' value left in the storage of anyone who chose it before.
-  return window.localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+  return storageGet(THEME_KEY) === 'dark' ? 'dark' : 'light';
 }
 
 // The server cannot know the preference, and no longer needs to guess: light is
@@ -64,10 +65,10 @@ export function useTheme(): [ThemePreference, (next: ThemePreference) => void] {
 
   const setTheme = useCallback((next: ThemePreference) => {
     if (next === 'dark') {
-      window.localStorage.setItem(THEME_KEY, 'dark');
+      storageSet(THEME_KEY, 'dark');
       document.documentElement.setAttribute('data-theme', 'dark');
     } else {
-      window.localStorage.removeItem(THEME_KEY);
+      storageRemove(THEME_KEY);
       document.documentElement.removeAttribute('data-theme');
     }
     notify();

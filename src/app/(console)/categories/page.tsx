@@ -1,13 +1,14 @@
 'use client';
 
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 
 import {
   ConfirmDialog,
   Drawer,
   EmptyState,
   ErrorBanner,
+  ResourceErrors,
   Field,
   PageHeader,
   Pagination,
@@ -15,6 +16,7 @@ import {
   TableSkeleton,
   useToast,
 } from '@/components/ui';
+import { ImageField } from '@/components/ui/ImageField';
 import { assetUrl, errorMessage } from '@/lib/api';
 import {
   categoryPutBody,
@@ -22,7 +24,6 @@ import {
   deleteCategory,
   listCategories,
   updateCategory,
-  uploadProductImage,
 } from '@/lib/queries';
 import { useResource } from '@/lib/use-resource';
 import type { Category } from '@/types';
@@ -36,7 +37,20 @@ export default function CategoriesPage() {
   const categories = useResource(`categories:${offset}`, (signal) =>
     listCategories({ limit: PAGE_SIZE, offset }, signal),
   );
-  const refresh = useCallback(() => categories.refresh(), [categories]);
+  // The whole tree, unpaged, for two things the page above cannot answer: the
+  // "Parent" column, whose parent may be on another page, and the parent
+  // picker in the drawer, which has to offer every category. 200 is the API's
+  // page ceiling and far more categories than a rail can hold.
+  const tree = useResource('category-tree', (signal) =>
+    listCategories({ limit: 200 }, signal),
+  );
+  const everyCategory = tree.data?.rows ?? [];
+
+  // Both lists change together, so both refresh together.
+  const refresh = () => {
+    categories.refresh();
+    tree.refresh();
+  };
 
   const [editing, setEditing] = useState<Category | null>(null);
   const [creating, setCreating] = useState(false);
@@ -84,11 +98,7 @@ export default function CategoriesPage() {
           <ErrorBanner message={actionError} />
         </div>
       ) : null}
-      {categories.error ? (
-        <div className="mb-4">
-          <ErrorBanner message={categories.error} onRetry={refresh} />
-        </div>
-      ) : null}
+      <ResourceErrors resources={[categories, tree]} />
 
       <Panel flush>
         {categories.loading && !categories.data ? (
@@ -118,7 +128,7 @@ export default function CategoriesPage() {
               </thead>
               <tbody>
                 {rows.map((category) => {
-                  const parent = rows.find((row) => row.id === category.parent_id);
+                  const parent = everyCategory.find((row) => row.id === category.parent_id);
                   return (
                     <tr key={category.id}>
                       <td>
@@ -191,7 +201,7 @@ export default function CategoriesPage() {
       {creating || editing ? (
         <CategoryDrawer
           category={editing}
-          all={rows}
+          all={everyCategory}
           onClose={() => {
             setCreating(false);
             setEditing(null);
@@ -279,19 +289,6 @@ function CategoryDrawer({
     }
   }
 
-  async function onUpload(file: File) {
-    setUploading(true);
-    try {
-      // The uploads endpoint is shared — it stores a file and returns a
-      // relative path; nothing about it is product-specific.
-      setImageUrl(await uploadProductImage(file));
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setUploading(false);
-    }
-  }
-
   return (
     <Drawer
       open
@@ -302,8 +299,13 @@ function CategoryDrawer({
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" form="category-form" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
+          <button
+            type="submit"
+            form="category-form"
+            className="btn btn-primary"
+            disabled={saving || uploading}
+          >
+            {saving ? 'Saving…' : uploading ? 'Uploading…' : 'Save'}
           </button>
         </>
       }
@@ -389,41 +391,14 @@ function CategoryDrawer({
           )}
         </Field>
 
-        <div>
-          <span className="label">Rail image</span>
-          <div className="flex items-center gap-3">
-            {imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={assetUrl(imageUrl)}
-                alt=""
-                className="h-14 w-14 rounded-[0.4rem] border border-line object-cover"
-              />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-[0.4rem] border border-dashed border-line text-2xs text-ink-faint">
-                None
-              </div>
-            )}
-            <div>
-              <label className="btn btn-secondary btn-sm cursor-pointer">
-                {uploading ? 'Uploading…' : 'Upload'}
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) onUpload(file);
-                    event.target.value = '';
-                  }}
-                />
-              </label>
-              <p className="mt-1 text-2xs text-ink-faint">
-                Without one, the storefront falls back to an emoji.
-              </p>
-            </div>
-          </div>
-        </div>
+        <ImageField
+          label="Rail image"
+          value={imageUrl}
+          onChange={setImageUrl}
+          onError={setError}
+          onBusy={setUploading}
+          hint="Square, at least 400px. Shown on the storefront's category rail."
+        />
       </form>
     </Drawer>
   );

@@ -33,6 +33,7 @@ function LoginForm() {
   const [notice] = useState(() => {
     const reason = params.get('reason');
     if (reason === 'expired') return 'Your session expired. Please sign in again.';
+    if (reason === 'password') return 'Password changed. Sign in with the new one.';
     return '';
   });
 

@@ -45,7 +45,7 @@ import { useId, useState } from 'react';
 import { clsx } from 'clsx';
 
 /** Categorical identity slots, light and dark. See the note above. */
-export const SERIES = {
+const SERIES = {
   light: ['#2a78d6', '#eb6834'],
   dark: ['#3987e5', '#d95926'],
 } as const;
@@ -53,7 +53,9 @@ export const SERIES = {
 /**
  * Emitted once per chart so the marks can switch with the theme without React
  * re-rendering. `currentColor` is not enough — a chart needs two or three
- * independent colours at once.
+ * independent colours at once. Only `data-theme="dark"` switches them: the
+ * console does not follow the OS (see globals.css), so a `prefers-color-scheme`
+ * rule here would paint the dark palette onto a white surface.
  */
 function SeriesStyles({ scope }: { scope: string }) {
   return (
@@ -61,12 +63,6 @@ function SeriesStyles({ scope }: { scope: string }) {
       [data-chart="${scope}"] {
         --s1: ${SERIES.light[0]};
         --s2: ${SERIES.light[1]};
-      }
-      @media (prefers-color-scheme: dark) {
-        :root:not([data-theme="light"]) [data-chart="${scope}"] {
-          --s1: ${SERIES.dark[0]};
-          --s2: ${SERIES.dark[1]};
-        }
       }
       :root[data-theme="dark"] [data-chart="${scope}"] {
         --s1: ${SERIES.dark[0]};
@@ -362,8 +358,10 @@ export function BarChart({
   return (
     <ul className="space-y-2" data-chart={scope} aria-label={ariaLabel}>
       <SeriesStyles scope={scope} />
-      {rows.map((row) => (
-        <li key={row.label} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1">
+      {rows.map((row, index) => (
+        // Labels are product or category names and can repeat; the position
+        // is what makes a ranked row unique.
+        <li key={`${index}-${row.label}`} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1">
           <span className="truncate text-sm" title={row.label}>
             {row.label}
             {row.detail ? (

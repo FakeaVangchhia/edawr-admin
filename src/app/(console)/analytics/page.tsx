@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 
 import { BarChart, LineChart, OnTimeBar, StatTile } from '@/components/charts';
-import { EmptyState, ErrorBanner, PageHeader, Panel } from '@/components/ui';
+import { EmptyState, PageHeader, Panel, ResourceErrors } from '@/components/ui';
 import {
   count,
   dateOnly,
@@ -69,9 +69,6 @@ export default function AnalyticsPage() {
     value: point.orders,
   }));
 
-  const anyError =
-    summary.error || revenue.error || top.error || categories.error || delivery.error;
-
   return (
     <>
       <PageHeader
@@ -112,11 +109,9 @@ export default function AnalyticsPage() {
         }
       />
 
-      {anyError ? (
-        <div className="mb-4">
-          <ErrorBanner message={anyError} onRetry={() => summary.refresh()} />
-        </div>
-      ) : null}
+      <ResourceErrors
+        resources={[summary, revenue, top, slow, categories, delivery, inventory]}
+      />
 
       {/* --- headline ------------------------------------------------------ */}
       <div className="mb-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -354,7 +349,7 @@ export default function AnalyticsPage() {
                 </thead>
                 <tbody>
                   {inventoryData.items.map((item) => (
-                    <tr key={item.product_id}>
+                    <tr key={item.product_id ?? item.name}>
                       <td>{item.name}</td>
                       <td className={`num ${item.units <= 0 ? 'text-danger font-medium' : ''}`}>
                         {count(item.units)}

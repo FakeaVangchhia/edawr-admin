@@ -1,7 +1,7 @@
 'use client';
 
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 
 import { RequireCapability } from '@/components/shell/RequireCapability';
 import {
@@ -58,7 +58,8 @@ function Promos() {
   const promos = useResource(`promos:${offset}`, (signal) =>
     listPromos({ limit: PAGE_SIZE, offset }, signal),
   );
-  const refresh = useCallback(() => promos.refresh(), [promos]);
+  // `refresh` is stable across renders (see use-resource.ts), so no wrapper.
+  const refresh = promos.refresh;
 
   const [editing, setEditing] = useState<Promo | null>(null);
   const [creating, setCreating] = useState(false);

@@ -18,6 +18,7 @@
  * so editing this object in devtools buys a menu item that returns 403.
  */
 
+import { storageGet, storageRemove, storageSet } from '@/lib/storage';
 import type { ConsoleSession, Role } from '@/types';
 
 export const SESSION_KEY = 'edawr-console-v1';
@@ -32,9 +33,7 @@ const ROLES: readonly Role[] = ['admin', 'manager'];
  * screen on every load is not.
  */
 export function readSession(): ConsoleSession | null {
-  if (typeof window === 'undefined') return null;
-
-  const raw = window.localStorage.getItem(SESSION_KEY);
+  const raw = storageGet(SESSION_KEY);
   if (!raw) return null;
 
   try {
@@ -45,7 +44,7 @@ export function readSession(): ConsoleSession | null {
       typeof parsed.email !== 'string' ||
       !ROLES.includes(parsed.role as Role)
     ) {
-      window.localStorage.removeItem(SESSION_KEY);
+      storageRemove(SESSION_KEY);
       return null;
     }
     return {
@@ -55,20 +54,18 @@ export function readSession(): ConsoleSession | null {
       accessToken: parsed.accessToken,
     };
   } catch {
-    window.localStorage.removeItem(SESSION_KEY);
+    storageRemove(SESSION_KEY);
     return null;
   }
 }
 
 export function writeSession(session: ConsoleSession): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  storageSet(SESSION_KEY, JSON.stringify(session));
   notify();
 }
 
 export function clearSession(): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(SESSION_KEY);
+  storageRemove(SESSION_KEY);
   notify();
 }
 
@@ -119,8 +116,7 @@ let cachedRaw: string | null = null;
 let cachedSession: ConsoleSession | null = null;
 
 export function getSnapshot(): ConsoleSession | null {
-  const raw =
-    typeof window === 'undefined' ? null : window.localStorage.getItem(SESSION_KEY);
+  const raw = storageGet(SESSION_KEY);
   if (raw !== cachedRaw) {
     cachedRaw = raw;
     cachedSession = readSession();

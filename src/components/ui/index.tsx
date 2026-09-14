@@ -131,6 +131,33 @@ export function ErrorBanner({
   );
 }
 
+/**
+ * One banner per failed fetch, each with its own retry.
+ *
+ * A page that shows several resources has to report every one that failed, or
+ * a dead endpoint renders as a true-looking empty state — "nothing in flight",
+ * "every shelf is above its reorder level" — with nothing to say the number
+ * was never fetched. Pass every resource the page reads; the ones that
+ * succeeded render nothing.
+ */
+export function ResourceErrors({
+  resources,
+  className = 'mb-4 space-y-2',
+}: {
+  resources: { error: string; refresh: () => void }[];
+  className?: string;
+}) {
+  const failed = resources.filter((resource) => resource.error);
+  if (failed.length === 0) return null;
+  return (
+    <div className={className}>
+      {failed.map((resource, index) => (
+        <ErrorBanner key={index} message={resource.error} onRetry={resource.refresh} />
+      ))}
+    </div>
+  );
+}
+
 export function TableSkeleton({ rows = 6, columns = 5 }: { rows?: number; columns?: number }) {
   return (
     <div className="p-4" aria-hidden="true">

@@ -99,7 +99,11 @@ export default function CashPage() {
           single "revenue" tile here is the exact mistake this screen exists to
           undo. */}
       <div className="mb-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label="Deliveries" value={count(data?.orders ?? 0)} />
+        <StatTile
+          label="Deliveries"
+          value={count(data?.orders ?? 0)}
+          hint="Orders delivered in the window"
+        />
         <StatTile
           label="Expected"
           value={money(data?.expected ?? 0)}

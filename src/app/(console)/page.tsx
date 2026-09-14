@@ -8,7 +8,7 @@ import { LineChart, StatTile } from '@/components/charts';
 import { RiderLocationPanel } from '@/components/riders/RiderLocationPanel';
 import {
   EmptyState,
-  ErrorBanner,
+  ResourceErrors,
   PageHeader,
   Panel,
   StatusBadge,
@@ -96,11 +96,7 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {summary.error ? (
-        <div className="mb-4">
-          <ErrorBanner message={summary.error} onRetry={summary.refresh} />
-        </div>
-      ) : null}
+      <ResourceErrors resources={[summary, revenue, inventory, open]} />
 
       {/* --- headline figures --- */}
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -178,7 +174,7 @@ export default function OverviewPage() {
           ) : (
             <ul className="divide-y divide-line text-sm">
               {inventoryData.items.slice(0, 7).map((item) => (
-                <li key={item.product_id} className="flex items-center justify-between gap-2 py-1.5">
+                <li key={item.product_id ?? item.name} className="flex items-center justify-between gap-2 py-1.5">
                   <span className="truncate">{item.name}</span>
                   <span
                     className={`badge ${item.units <= 0 ? 'badge-danger' : 'badge-warn'} numeric`}

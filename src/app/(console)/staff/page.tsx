@@ -1,13 +1,14 @@
 'use client';
 
 import { KeyRound, Pencil, Plus, UserMinus } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   ConfirmDialog,
   Drawer,
   EmptyState,
   ErrorBanner,
+  ResourceErrors,
   Field,
   PageHeader,
   Pagination,
@@ -43,7 +44,8 @@ export default function StaffPage() {
   const staff = useResource(`staff:${roleFilter}:${offset}`, (signal) =>
     listStaff({ role: roleFilter || undefined, limit: PAGE_SIZE, offset }, signal),
   );
-  const refresh = useCallback(() => staff.refresh(), [staff]);
+  // `refresh` is stable across renders (see use-resource.ts), so no wrapper.
+  const refresh = staff.refresh;
 
   const [editing, setEditing] = useState<StaffUser | null>(null);
   const [creating, setCreating] = useState(false);
@@ -145,11 +147,7 @@ export default function StaffPage() {
           <ErrorBanner message={actionError} />
         </div>
       ) : null}
-      {staff.error ? (
-        <div className="mb-4">
-          <ErrorBanner message={staff.error} onRetry={refresh} />
-        </div>
-      ) : null}
+      <ResourceErrors resources={[staff, roster]} />
 
       <Panel flush>
         {staff.loading && !staff.data ? (

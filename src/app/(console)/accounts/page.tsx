@@ -1,13 +1,15 @@
 'use client';
 
 import { Info, Pencil, Plus, ShieldOff } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useMemo, useState } from 'react';
 
 import { RequireCapability } from '@/components/shell/RequireCapability';
 import {
   ConfirmDialog,
   Drawer,
   ErrorBanner,
+  ResourceErrors,
   Field,
   PageHeader,
   Pagination,
@@ -20,6 +22,7 @@ import { ROLE_LABEL } from '@/lib/guard';
 import { dateOnly, dateTime } from '@/lib/format';
 import { createAccount, deactivateAccount, listAccounts, updateAccount } from '@/lib/queries';
 import { useResource } from '@/lib/use-resource';
+import { clearSession } from '@/lib/session';
 import { useSession } from '@/lib/use-session';
 import type { AdminAccount, Role } from '@/types';
 
@@ -48,11 +51,13 @@ const PAGE_SIZE = 25;
 
 function Accounts() {
   const session = useSession();
+  const router = useRouter();
   const [offset, setOffset] = useState(0);
   const accounts = useResource(`accounts:${offset}`, (signal) =>
     listAccounts({ limit: PAGE_SIZE, offset }, signal),
   );
-  const refresh = useCallback(() => accounts.refresh(), [accounts]);
+  // `refresh` is stable across renders (see use-resource.ts), so no wrapper.
+  const refresh = accounts.refresh;
 
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [creating, setCreating] = useState(false);
@@ -155,11 +160,7 @@ function Accounts() {
           <ErrorBanner message={actionError} />
         </div>
       ) : null}
-      {accounts.error ? (
-        <div className="mb-4">
-          <ErrorBanner message={accounts.error} onRetry={refresh} />
-        </div>
-      ) : null}
+      <ResourceErrors resources={[accounts, adminRoster]} />
 
       <Panel flush>
         {accounts.loading && !accounts.data ? (
@@ -275,6 +276,15 @@ function Accounts() {
             setEditing(null);
           }}
           onSaved={(saved) => {
+            // A password change retires every token the account holds,
+            // including the one this tab is using when the account is your
+            // own. Sign out cleanly now rather than letting the next request
+            // bounce through a 401 that reads as "your session expired".
+            if (saved.passwordChanged && session?.email === saved.email) {
+              clearSession();
+              router.replace('/login?reason=password');
+              return;
+            }
             toast.success(
               editing
                 ? `${saved.email} saved.`
@@ -316,7 +326,7 @@ function AccountDrawer({
   lockReason: string | null;
   onClose: () => void;
   /** Reports the account as saved, so the caller can name it in a confirmation. */
-  onSaved: (saved: { email: string; role: Role }) => void;
+  onSaved: (saved: { email: string; role: Role; passwordChanged: boolean }) => void;
 }) {
   const [email, setEmail] = useState(account?.email ?? '');
   const [name, setName] = useState(account?.name ?? '');
@@ -364,7 +374,11 @@ function AccountDrawer({
           password,
         });
       }
-      onSaved({ email: email.trim(), role: account && roleLocked ? account.role : role });
+      onSaved({
+        email: email.trim(),
+        role: account && roleLocked ? account.role : role,
+        passwordChanged: Boolean(account && password),
+      });
     } catch (caught) {
       if (caught instanceof ApiError) {
         const fields = caught.fieldErrors;
@@ -479,8 +493,8 @@ function AccountDrawer({
 
         {isSelf && password ? (
           <p className="rounded-[0.4rem] border border-info bg-info-quiet px-3 py-2 text-xs text-info">
-            You are changing your own password. Your current session keeps working — sign in with
-            the new one next time.
+            You are changing your own password. Saving signs you out everywhere, this tab
+            included — sign back in with the new one.
           </p>
         ) : null}
       </form>

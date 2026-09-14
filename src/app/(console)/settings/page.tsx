@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ExternalLink, Info, Loader2 } from 'lucide-react';
+import { Info, Loader2 } from 'lucide-react';
 
 import { ErrorBanner, PageHeader, Panel, useToast } from '@/components/ui';
 import { API_BASE_URL, errorMessage } from '@/lib/api';
@@ -28,8 +28,9 @@ import type { StoreSettings } from '@/types';
  * redeploy to pause checkout during a power cut means the shop carries on
  * promising 15-minute delivery it cannot make.
  *
- * That table is what closed three of the four gaps this page used to list at
- * the bottom.
+ * The "Known gaps" panel at the bottom is the honest list of what this system
+ * still cannot do, kept here because this is the screen an operator reads
+ * when they are wondering.
  */
 export default function SettingsPage() {
   const config = useResource('store-config', (signal) => storeConfig(signal));
@@ -129,21 +130,20 @@ export default function SettingsPage() {
       <Panel title="Known gaps" className="mt-3">
         {/* Stated rather than hidden. An operator who knows the system cannot
             do something will work around it; one who assumes it can will find
-            out at the worst moment.
-
-            Three entries were removed from this list because the thing they
-            described was built, not because the list got tidied: opening hours
-            and a pause switch, a delivery-zone check, and an exit for a
-            dispatched order that cannot be delivered. */}
+            out at the worst moment. Remove an entry when the thing is built,
+            not when the list looks long. */}
         <ul className="space-y-2 text-sm text-ink-soft">
-          <Gap title="Cash is recorded as intent, not collection">
-            The rider is told what to collect, and nothing records what they actually took. End of
-            shift reconciliation means summing order totals and trusting them, which for a cash
-            business is the main way money goes missing quietly.
+          <Gap title="Guests are not notified outside the tracking page">
+            A customer with the app and an account is told when their order is packed, on the way
+            and delivered. A guest has only the tracking page — no SMS, no WhatsApp.
           </Gap>
-          <Gap title="No customer notification outside the browser tab">
-            The tracking page is the only channel. Close the tab and the customer has no idea when
-            the rider is coming — no SMS, no WhatsApp, no push.
+          <Gap title="Phone numbers are never verified">
+            An account proves someone knows a number, not that they hold the SIM, so it sees only
+            the orders placed while signed in to it. Verification needs an SMS provider.
+          </Gap>
+          <Gap title="Rider positions are not reported yet">
+            The map on the overview waits for the rider app to send a position; until it does,
+            every rider reads &ldquo;no position yet&rdquo;.
           </Gap>
           <Gap title="No receipt and no tax fields">
             No printable invoice, no HSN codes, no GSTIN. A compliant tax invoice cannot be issued
@@ -154,10 +154,6 @@ export default function SettingsPage() {
             so the road can be several times it — a genuinely 6 km address may be a 20-minute ride.
           </Gap>
         </ul>
-        <p className="mt-3 flex items-center gap-1 text-xs text-ink-faint">
-          <ExternalLink size={12} aria-hidden="true" />
-          These are tracked in the project&apos;s backlog, not discovered here.
-        </p>
       </Panel>
     </>
   );
@@ -166,10 +162,11 @@ export default function SettingsPage() {
 /**
  * The editable half.
  *
- * Local state seeded from the server row, and PATCHed back — only the fields
- * that were touched, because the endpoint is partial by design. A full replace
- * would mean the pause switch had to be resent with every edit to the hours,
- * and a screen that forgot would silently reopen a store somebody had shut.
+ * Local state seeded from the server row, and PATCHed back. The pause switch
+ * sends its one field the moment it is clicked; the Save button sends the rest
+ * of the form. The endpoint is partial by design, so neither has to resend
+ * what the other owns — and a screen that had to would eventually reopen a
+ * store somebody had shut.
  */
 function OperationsForm({
   settings,
@@ -193,32 +190,39 @@ function OperationsForm({
    * server's values on the very same render. Same technique as `useResource`
    * itself and as the storefront's `useQuote`.
    */
-  const [edits, setEdits] = useState<{ from: StoreSettings; value: StoreSettings } | null>(
-    null,
-  );
+  const [edits, setEdits] = useState<{ from: StoreSettings; value: Draft } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const toast = useToast();
 
-  const draft = edits?.from === settings ? edits.value : settings;
+  const draft = edits?.from === settings ? edits.value : toDraft(settings);
 
-  const patch = <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => {
+  const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setEdits({ from: settings, value: { ...draft, [key]: value } });
   };
 
-  /** Everything the form owns, as the API wants it. */
+  // The three numbers are kept as the text in their boxes and parsed only
+  // here, so a half-typed "1" on the way to "12", or an emptied box, is a
+  // disabled Save rather than a zero radius shipped to checkout.
+  const numbers = {
+    delivery_radius_km: parseNumber(draft.delivery_radius_km),
+    store_latitude: parseNumber(draft.store_latitude),
+    store_longitude: parseNumber(draft.store_longitude),
+  };
+  const numbersValid = Object.values(numbers).every((value) => value !== null);
+
+  /** Everything the Save button owns, as the API wants it. */
   function wholeForm(): Partial<StoreSettings> {
     return {
-      is_accepting_orders: draft.is_accepting_orders,
       closed_message: draft.closed_message,
       // The API takes `HH:MM` or `HH:MM:SS`; an <input type="time"> gives the
       // former, and the row comes back as the latter.
       opens_at: draft.opens_at,
       closes_at: draft.closes_at,
-      delivery_radius_km: Number(draft.delivery_radius_km),
-      store_latitude: Number(draft.store_latitude),
-      store_longitude: Number(draft.store_longitude),
+      delivery_radius_km: numbers.delivery_radius_km ?? settings.delivery_radius_km,
+      store_latitude: numbers.store_latitude ?? settings.store_latitude,
+      store_longitude: numbers.store_longitude ?? settings.store_longitude,
     };
   }
 
@@ -228,10 +232,8 @@ function OperationsForm({
    * That distinction is the point. The pause switch saves on the click, because
    * it is the control someone reaches for during a power cut and making them
    * find a Save button afterwards is how orders keep arriving for another thirty
-   * seconds. But if it sent the whole form, a manager who had half-typed a new
-   * radius ("1" on the way to "12", or an emptied box, which `Number('')` makes
-   * `0`) would silently ship that too — and a zero radius or a zero latitude
-   * changes what checkout accepts. The switch now sends one field.
+   * seconds. If it sent the whole form, a manager who had half-typed a new
+   * radius would silently ship that too. The switch sends one field.
    */
   async function save(body: Partial<StoreSettings>, success: string) {
     setBusy(true);
@@ -375,7 +377,7 @@ function OperationsForm({
               className="field"
               value={draft.delivery_radius_km}
               disabled={busy}
-              onChange={(event) => patch('delivery_radius_km', Number(event.target.value))}
+              onChange={(event) => patch('delivery_radius_km', event.target.value)}
             />
             <p className="mt-1 text-xs text-ink-faint">
               Checkout refuses an address further than this from the store. Straight-line distance,
@@ -401,7 +403,7 @@ function OperationsForm({
                 className="field"
                 value={draft.store_latitude}
                 disabled={busy}
-                onChange={(event) => patch('store_latitude', Number(event.target.value))}
+                onChange={(event) => patch('store_latitude', event.target.value)}
               />
             </div>
             <div>
@@ -415,7 +417,7 @@ function OperationsForm({
                 className="field"
                 value={draft.store_longitude}
                 disabled={busy}
-                onChange={(event) => patch('store_longitude', Number(event.target.value))}
+                onChange={(event) => patch('store_longitude', event.target.value)}
               />
             </div>
           </div>
@@ -429,7 +431,8 @@ function OperationsForm({
         <button
           type="button"
           className="btn btn-primary"
-          disabled={busy}
+          disabled={busy || !numbersValid}
+          title={numbersValid ? undefined : 'The radius and both coordinates need a number.'}
           onClick={() => save(wholeForm(), 'Store settings saved.')}
         >
           {busy ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : null}
@@ -449,6 +452,29 @@ function OperationsForm({
       </div>
     </Panel>
   );
+}
+
+/** The form's own shape: the three numbers are the text in their boxes. */
+type Draft = Omit<StoreSettings, 'delivery_radius_km' | 'store_latitude' | 'store_longitude'> & {
+  delivery_radius_km: string;
+  store_latitude: string;
+  store_longitude: string;
+};
+
+function toDraft(settings: StoreSettings): Draft {
+  return {
+    ...settings,
+    delivery_radius_km: String(settings.delivery_radius_km),
+    store_latitude: String(settings.store_latitude),
+    store_longitude: String(settings.store_longitude),
+  };
+}
+
+/** A finite number, or null for blank and anything else the box lets through. */
+function parseNumber(text: string): number | null {
+  if (text.trim() === '') return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
 }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

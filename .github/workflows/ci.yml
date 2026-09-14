@@ -1,16 +1,8 @@
-# Run the console's tests on every push and pull request.
-#
-# This repository holds the staff console alone. It was split out of the eDawr
-# monorepo, which was then dissolved: the API lives in `edawr-backend`, and the
-# storefront and rider app are no longer under version control at all. Nothing
-# here can test those, and it should not try — a job that reaches outside its
-# own repository is a job that breaks whenever anything around it moves.
-#
-# This is therefore one of only two pipelines left in the project. The
-# storefront's equivalent — the same steps, including the prerender check — was
-# removed with the monorepo and survives only in the history bundle on the
-# developer's disk. If the storefront is ever given a repository again, that
-# workflow is the thing to restore first.
+# Lint, typecheck, test and production-build the console on every push and
+# pull request. This repository holds the staff console alone; the API
+# (`edawr-backend`), the storefront (`edawr-frontend`) and the two Expo apps
+# each have their own, and a job that reaches outside its own repository is a
+# job that breaks whenever anything around it moves.
 #
 # Counts are deliberately not written down. They go stale within a fortnight,
 # which teaches the next reader to distrust the comment rather than update it.
@@ -20,7 +12,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, dev]
+    branches: [master, remote]
   pull_request:
 
 # A new push to the same branch makes the previous run irrelevant. Without this
@@ -72,7 +64,7 @@ jobs:
           # means the browser will refuse every one of them.
           stray=$(find .next/server/app -name '*.html' ! -name '_global-error.html')
           if [ -n "$stray" ]; then
-            echo "::error::Prerendered pages found — the root layout has stopped calling await connection():"
+            echo "::error::Prerendered pages found — the root layout has stopped reading the request (headers()):"
             echo "$stray"
             exit 1
           fi

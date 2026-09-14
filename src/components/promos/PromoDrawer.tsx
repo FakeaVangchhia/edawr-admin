@@ -3,7 +3,8 @@
 import { useState } from 'react';
 
 import { Drawer, ErrorBanner, Field } from '@/components/ui';
-import { assetUrl, errorMessage } from '@/lib/api';
+import { ImageField } from '@/components/ui/ImageField';
+import { errorMessage } from '@/lib/api';
 import {
   LINK_HINTS,
   LINK_INPUT_TYPES,
@@ -15,7 +16,7 @@ import {
   parseLink,
   type LinkKind,
 } from '@/lib/promo-link';
-import { createPromo, promoPutBody, updatePromo, uploadProductImage } from '@/lib/queries';
+import { createPromo, promoPutBody, updatePromo } from '@/lib/queries';
 import type { Promo } from '@/types';
 
 /**
@@ -115,19 +116,6 @@ export function PromoDrawer({
       setError(errorMessage(caught));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function onUpload(file: File) {
-    setUploading(true);
-    try {
-      // The uploads endpoint stores a file and returns a relative path; nothing
-      // about it is product-specific. Categories use it the same way.
-      setImageUrl(await uploadProductImage(file));
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setUploading(false);
     }
   }
 
@@ -271,58 +259,15 @@ export function PromoDrawer({
           </Field>
         </div>
 
-        <div>
-          <span className="label">Banner image</span>
-          <div className="flex items-center gap-3">
-            {imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={assetUrl(imageUrl)}
-                alt=""
-                className="h-14 w-24 rounded-[0.4rem] border border-line object-cover"
-              />
-            ) : (
-              <div className="flex h-14 w-24 items-center justify-center rounded-[0.4rem] border border-dashed border-line text-2xs text-ink-faint">
-                None
-              </div>
-            )}
-            <div>
-              <div className="flex items-center gap-1.5">
-                <label
-                  className={`btn btn-secondary btn-sm ${uploading ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}
-                >
-                  {uploading ? 'Uploading…' : 'Upload'}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    className="hidden"
-                    disabled={uploading}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) onUpload(file);
-                      event.target.value = '';
-                    }}
-                  />
-                </label>
-                {imageUrl && !uploading ? (
-                  // Back to title-on-navy. Without this the only way to drop a
-                  // picture was to delete the promotion.
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setImageUrl('')}
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </div>
-              <p className="mt-1 text-2xs text-ink-faint">
-                Wide works best — about 16:6, at least 1600px across. Without one the banner is
-                the title on navy.
-              </p>
-            </div>
-          </div>
-        </div>
+        <ImageField
+          label="Banner image"
+          shape="wide"
+          value={imageUrl}
+          onChange={setImageUrl}
+          onError={setError}
+          onBusy={setUploading}
+          hint="Wide works best — about 16:6, at least 1600px across. Without one the banner is the title on navy."
+        />
       </form>
     </Drawer>
   );
