@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Info, Loader2 } from 'lucide-react';
 
-import { ErrorBanner, PageHeader, Panel, useToast } from '@/components/ui';
+import { DefinitionRow, ErrorBanner, PageHeader, Panel, useToast } from '@/components/ui';
 import { API_BASE_URL, errorMessage } from '@/lib/api';
 import { minutes, money } from '@/lib/format';
 import { storeConfig, storeSettings, updateStoreSettings } from '@/lib/queries';
@@ -75,11 +75,11 @@ export default function SettingsPage() {
         <Panel title="Store">
           {data ? (
             <dl className="space-y-2 text-sm">
-              <Row label="Name" value={data.store_name} />
-              <Row label="City" value={data.store_city} />
-              <Row label="Minimum order" value={money(data.min_order_value)} />
-              <Row label="Free delivery above" value={money(data.free_delivery_above)} />
-              <Row label="Handling fee" value={money(data.handling_fee)} />
+              <DefinitionRow divided label="Name" value={data.store_name} />
+              <DefinitionRow divided label="City" value={data.store_city} />
+              <DefinitionRow divided label="Minimum order" value={money(data.min_order_value)} />
+              <DefinitionRow divided label="Free delivery above" value={money(data.free_delivery_above)} />
+              <DefinitionRow divided label="Handling fee" value={money(data.handling_fee)} />
             </dl>
           ) : (
             <div className="skeleton h-32" />
@@ -119,7 +119,7 @@ export default function SettingsPage() {
 
       <Panel title="This console" className="mt-3">
         <dl className="space-y-2 text-sm">
-          <Row label="API server" value={API_BASE_URL || 'Not configured'} mono />
+          <DefinitionRow divided label="API server" value={API_BASE_URL || 'Not configured'} mono />
         </dl>
         <p className="mt-3 text-xs text-ink-faint">
           If screens load but stay empty, this is the first thing to check — the browser blocks
@@ -475,15 +475,6 @@ function parseNumber(text: string): number | null {
   if (text.trim() === '') return null;
   const value = Number(text);
   return Number.isFinite(value) ? value : null;
-}
-
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-line pb-2 last:border-0 last:pb-0">
-      <dt className="text-ink-faint">{label}</dt>
-      <dd className={mono ? 'mono text-right' : 'numeric text-right font-medium'}>{value}</dd>
-    </div>
-  );
 }
 
 function Gap({ title, children }: { title: string; children: React.ReactNode }) {

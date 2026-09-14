@@ -21,7 +21,7 @@ import {
 import { assetUrl, errorMessage } from '@/lib/api';
 import { count, marginPercent, money } from '@/lib/format';
 import { deleteProduct, listCategories, listProducts, updateProduct } from '@/lib/queries';
-import { useDebounced, useResource } from '@/lib/use-resource';
+import { resettingPage, useDebounced, useResource } from '@/lib/use-resource';
 import type { Product } from '@/types';
 
 const PAGE_SIZE = 25;
@@ -98,13 +98,6 @@ function ProductsScreen() {
     setOffset(0);
   }
 
-  function filtered<T>(setter: (value: T) => void) {
-    return (value: T) => {
-      setter(value);
-      setOffset(0);
-    };
-  }
-
   async function confirmDelete() {
     if (!deleting) return;
     setBusy(true);
@@ -158,7 +151,7 @@ function ProductsScreen() {
             placeholder="Search name, SKU, brand or category"
             aria-label="Search products"
             value={search}
-            onChange={(event) => filtered(setSearch)(event.target.value)}
+            onChange={(event) => resettingPage(setSearch, setOffset)(event.target.value)}
           />
         </div>
 
@@ -170,7 +163,7 @@ function ProductsScreen() {
             id="category-filter"
             className="field w-44"
             value={category}
-            onChange={(event) => filtered(setCategory)(event.target.value)}
+            onChange={(event) => resettingPage(setCategory, setOffset)(event.target.value)}
           >
             <option value="">All categories</option>
             {(categories.data?.rows ?? []).map((row) => (
@@ -189,7 +182,7 @@ function ProductsScreen() {
             id="stock-filter"
             className="field w-36"
             value={stock}
-            onChange={(event) => filtered(setStock)(event.target.value as '' | 'low' | 'out')}
+            onChange={(event) => resettingPage(setStock, setOffset)(event.target.value as StockFilter)}
           >
             <option value="">Any level</option>
             <option value="low">Low stock</option>
@@ -205,7 +198,7 @@ function ProductsScreen() {
             id="status-filter"
             className="field w-32"
             value={status}
-            onChange={(event) => filtered(setStatus)(event.target.value)}
+            onChange={(event) => resettingPage(setStatus, setOffset)(event.target.value)}
           >
             <option value="">Any status</option>
             <option value="active">Active</option>

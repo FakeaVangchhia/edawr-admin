@@ -3,7 +3,14 @@
 import { AlertTriangle, MapPin, Phone, User } from 'lucide-react';
 import { useState } from 'react';
 
-import { ConfirmDialog, Drawer, ErrorBanner, StatusBadge, useToast } from '@/components/ui';
+import {
+  ConfirmDialog,
+  DefinitionRow,
+  Drawer,
+  ErrorBanner,
+  StatusBadge,
+  useToast,
+} from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { advanceOrder, assignOrder, restockOrder } from '@/lib/queries';
 import { dateTime, distanceKm, minutes, money, phone as formatPhone } from '@/lib/format';
@@ -233,10 +240,10 @@ export function OrderDrawer({
               </tbody>
             </table>
             <dl className="space-y-1 border-t border-line px-3 py-2.5 text-sm">
-              <Row label="Items" value={money(order.items_total)} />
-              <Row label="Delivery" value={money(order.delivery_fee)} />
-              <Row label="Handling" value={money(order.handling_fee)} />
-              <Row label="Total" value={money(order.grand_total)} strong />
+              <DefinitionRow label="Items" value={money(order.items_total)} />
+              <DefinitionRow label="Delivery" value={money(order.delivery_fee)} />
+              <DefinitionRow label="Handling" value={money(order.handling_fee)} />
+              <DefinitionRow label="Total" value={money(order.grand_total)} strong />
             </dl>
           </section>
 
@@ -246,19 +253,19 @@ export function OrderDrawer({
               Fulfilment
             </h3>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
-              <Row label="Promised" value={minutes(order.promised_minutes)} />
-              <Row
+              <DefinitionRow label="Promised" value={minutes(order.promised_minutes)} />
+              <DefinitionRow
                 label="Actual"
                 value={
                   order.fulfilment_minutes === null ? '—' : minutes(order.fulfilment_minutes)
                 }
               />
-              <Row label="Packed" value={dateTime(order.packed_at)} />
-              <Row label="Dispatched" value={dateTime(order.dispatched_at)} />
-              <Row label="Delivered" value={dateTime(order.delivered_at)} />
-              <Row label="Rider" value={order.rider?.name ?? 'Unassigned'} />
+              <DefinitionRow label="Packed" value={dateTime(order.packed_at)} />
+              <DefinitionRow label="Dispatched" value={dateTime(order.dispatched_at)} />
+              <DefinitionRow label="Delivered" value={dateTime(order.delivered_at)} />
+              <DefinitionRow label="Rider" value={order.rider?.name ?? 'Unassigned'} />
               {order.rider ? (
-                <Row label="From rider's base" value={distanceKm(order.offered_distance_km)} />
+                <DefinitionRow label="From rider's base" value={distanceKm(order.offered_distance_km)} />
               ) : null}
             </dl>
 
@@ -417,14 +424,5 @@ export function OrderDrawer({
         }}
       />
     </>
-  );
-}
-
-function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs text-ink-faint">{label}</dt>
-      <dd className={strong ? 'font-semibold numeric' : 'numeric'}>{value}</dd>
-    </div>
   );
 }

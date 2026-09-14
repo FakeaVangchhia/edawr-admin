@@ -176,6 +176,46 @@ export function TableRegion({ label, children }: { label: string; children: Reac
   );
 }
 
+/**
+ * One `<dt>/<dd>` line of a definition list: a label on the left, a value on
+ * the right. `mono` for ids and tokens, `strong` for a total.
+ */
+export function DefinitionRow({
+  label,
+  value,
+  mono,
+  strong,
+  divided,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  strong?: boolean;
+  /** A hairline under each row but the last, for a long list. */
+  divided?: boolean;
+}) {
+  return (
+    <div
+      className={clsx(
+        'flex items-baseline justify-between gap-3',
+        divided && 'border-b border-line pb-2 last:border-0 last:pb-0',
+      )}
+    >
+      <dt className={divided ? 'text-ink-faint' : 'text-xs text-ink-faint'}>{label}</dt>
+      <dd
+        className={clsx(
+          'text-right',
+          mono ? 'mono' : 'numeric',
+          strong && 'font-semibold',
+          divided && !mono && 'font-medium',
+        )}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 export function TableSkeleton({ rows = 6, columns = 5 }: { rows?: number; columns?: number }) {
   return (
     <div className="p-4" aria-hidden="true">

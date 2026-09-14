@@ -105,6 +105,23 @@ export function useResource<T>(
 }
 
 /**
+ * Wrap a filter setter so changing the filter also returns to page one.
+ *
+ * Any filter change invalidates the page you were on: a manager on page 3 who
+ * narrows the filter would otherwise ask for offset 50 of a three-row result,
+ * see an empty table, and be told "51-3 of 3" underneath it.
+ */
+export function resettingPage<T>(
+  setter: (value: T) => void,
+  setOffset: (offset: number) => void,
+): (value: T) => void {
+  return (value) => {
+    setter(value);
+    setOffset(0);
+  };
+}
+
+/**
  * Debounce a value — for search boxes, so typing does not fire a request per
  * keystroke.
  */

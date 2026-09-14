@@ -139,6 +139,11 @@ export function ageFromSeconds(value: number | null | undefined): string {
   return `${Math.floor(seconds / 86400)}d`;
 }
 
+/** "delivery" as "Delivery": the audit log's lowercase vocabulary, as a label. */
+export function capitalise(word: string): string {
+  return word ? word[0].toUpperCase() + word.slice(1) : word;
+}
+
 /** Kilometres as "1.8 km", or an em dash when the distance is unknown.
  *
  *  **Null is not zero.** An order placed without geolocation has no distance to

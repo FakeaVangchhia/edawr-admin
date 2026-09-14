@@ -22,7 +22,7 @@ import { errorMessage } from '@/lib/api';
 import { dateTime, money, phone as formatPhone, relativeTime } from '@/lib/format';
 import { advanceOrder, listOrders, listRiders } from '@/lib/queries';
 import { MARK_READY, START_PACKING, type OrderStep } from '@/lib/order-steps';
-import { useDebounced, usePolling, useResource } from '@/lib/use-resource';
+import { resettingPage, useDebounced, usePolling, useResource } from '@/lib/use-resource';
 import type { Order, OrderStatus } from '@/types';
 
 const PAGE_SIZE = 25;
@@ -173,15 +173,6 @@ function OrdersScreen() {
     [refresh, toast],
   );
 
-  function onFilterChange<T>(setter: (value: T) => void) {
-    return (value: T) => {
-      setter(value);
-      // Any filter change invalidates the page you were on. Staying on page 3
-      // of a result set that now has one page shows an empty screen.
-      setOffset(0);
-    };
-  }
-
   return (
     <>
       <PageHeader
@@ -227,7 +218,7 @@ function OrdersScreen() {
             placeholder="Search name, phone, address or #id"
             aria-label="Search orders"
             value={search}
-            onChange={(event) => onFilterChange(setSearch)(event.target.value)}
+            onChange={(event) => resettingPage(setSearch, setOffset)(event.target.value)}
           />
         </div>
 
@@ -242,7 +233,7 @@ function OrdersScreen() {
                 className="field w-36"
                 value={status}
                 onChange={(event) =>
-                  onFilterChange(setStatus)(event.target.value as OrderStatus | '')
+                  resettingPage(setStatus, setOffset)(event.target.value as OrderStatus | '')
                 }
               >
                 {STATUS_OPTIONS.map((option) => (
@@ -261,7 +252,7 @@ function OrdersScreen() {
                 type="date"
                 className="field w-36"
                 value={from}
-                onChange={(event) => onFilterChange(setFrom)(event.target.value)}
+                onChange={(event) => resettingPage(setFrom, setOffset)(event.target.value)}
               />
             </div>
             <div>
@@ -273,7 +264,7 @@ function OrdersScreen() {
                 type="date"
                 className="field w-36"
                 value={to}
-                onChange={(event) => onFilterChange(setTo)(event.target.value)}
+                onChange={(event) => resettingPage(setTo, setOffset)(event.target.value)}
               />
             </div>
           </>
@@ -283,7 +274,7 @@ function OrdersScreen() {
           <input
             type="checkbox"
             checked={stalledOnly}
-            onChange={(event) => onFilterChange(setStalledOnly)(event.target.checked)}
+            onChange={(event) => resettingPage(setStalledOnly, setOffset)(event.target.checked)}
           />
           Stalled only
         </label>

@@ -20,7 +20,7 @@ import {
 import { ApiError, errorMessage } from '@/lib/api';
 import { dateOnly, phone as formatPhone } from '@/lib/format';
 import { createStaff, deleteStaff, listRiders, listStaff, updateStaff } from '@/lib/queries';
-import { useResource } from '@/lib/use-resource';
+import { resettingPage, useResource } from '@/lib/use-resource';
 import type { StaffUser } from '@/types';
 
 /**
@@ -71,13 +71,7 @@ export default function StaffPage() {
   const roster = useResource('rider-roster', (signal) => listRiders(signal));
   const riders = useMemo(() => roster.data ?? [], [roster.data]);
 
-  const changeRoleFilter = (next: string) => {
-    setRoleFilter(next);
-    // Back to page one. Without this, a manager on page 3 who narrows the
-    // filter asks for offset 50 of a three-row result, sees an empty table, and
-    // is told "51-3 of 3 staff" underneath it.
-    setOffset(0);
-  };
+  const changeRoleFilter = resettingPage(setRoleFilter, setOffset);
 
   async function confirmRemove() {
     if (!removing) return;

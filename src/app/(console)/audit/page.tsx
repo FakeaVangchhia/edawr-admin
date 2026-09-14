@@ -13,9 +13,9 @@ import {
   TableSkeleton,
   TableRegion,
 } from '@/components/ui';
-import { dateTime } from '@/lib/format';
+import { capitalise, dateTime } from '@/lib/format';
 import { listAudit } from '@/lib/queries';
-import { useDebounced, useResource } from '@/lib/use-resource';
+import { resettingPage, useDebounced, useResource } from '@/lib/use-resource';
 import type { AuditEntry } from '@/types';
 
 const PAGE_SIZE = 40;
@@ -78,13 +78,6 @@ function Audit() {
   const rows = entries.data?.rows ?? [];
   const total = entries.data?.total ?? 0;
 
-  function filtered<T>(setter: (value: T) => void) {
-    return (value: T) => {
-      setter(value);
-      setOffset(0);
-    };
-  }
-
   return (
     <>
       <PageHeader
@@ -104,7 +97,7 @@ function Audit() {
             placeholder="Search the log or a person's name"
             aria-label="Search the activity log"
             value={search}
-            onChange={(event) => filtered(setSearch)(event.target.value)}
+            onChange={(event) => resettingPage(setSearch, setOffset)(event.target.value)}
           />
         </div>
 
@@ -116,11 +109,11 @@ function Audit() {
             id="entity-filter"
             className="field w-32"
             value={entity}
-            onChange={(event) => filtered(setEntity)(event.target.value)}
+            onChange={(event) => resettingPage(setEntity, setOffset)(event.target.value)}
           >
             {ENTITIES.map((option) => (
               <option key={option || 'all'} value={option}>
-                {option ? option[0].toUpperCase() + option.slice(1) : 'Everything'}
+                {option ? capitalise(option) : 'Everything'}
               </option>
             ))}
           </select>
@@ -134,11 +127,11 @@ function Audit() {
             id="action-filter"
             className="field w-32"
             value={action}
-            onChange={(event) => filtered(setAction)(event.target.value)}
+            onChange={(event) => resettingPage(setAction, setOffset)(event.target.value)}
           >
             {ACTIONS.map((option) => (
               <option key={option || 'all'} value={option}>
-                {option ? option[0].toUpperCase() + option.slice(1) : 'Any action'}
+                {option ? capitalise(option) : 'Any action'}
               </option>
             ))}
           </select>
@@ -153,7 +146,7 @@ function Audit() {
             type="date"
             className="field w-36"
             value={from}
-            onChange={(event) => filtered(setFrom)(event.target.value)}
+            onChange={(event) => resettingPage(setFrom, setOffset)(event.target.value)}
           />
         </div>
 
@@ -166,7 +159,7 @@ function Audit() {
             type="date"
             className="field w-36"
             value={to}
-            onChange={(event) => filtered(setTo)(event.target.value)}
+            onChange={(event) => resettingPage(setTo, setOffset)(event.target.value)}
           />
         </div>
       </div>
@@ -209,7 +202,7 @@ function Audit() {
                           {entry.actor_kind === 'rider'
                             ? 'Rider'
                             : entry.actor_role
-                              ? entry.actor_role[0].toUpperCase() + entry.actor_role.slice(1)
+                              ? capitalise(entry.actor_role)
                               : 'System'}
                         </p>
                       </td>
