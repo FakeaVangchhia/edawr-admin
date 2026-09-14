@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import { connection } from 'next/server';
+import { Analytics } from '@vercel/analytics/next';
 
 import './globals.css';
 
@@ -91,6 +92,16 @@ export default async function RootLayout({
       </head>
       <body className={`${inter.variable} ${mono.variable} antialiased`}>
         {children}
+        {/*
+          Vercel Web Analytics. Renders nothing itself; on mount it appends a
+          `<script src="/_vercel/insights/script.js">` and page views POST to
+          `/_vercel/insights/view`, both same-origin, so `connect-src 'self'`
+          in `src/proxy.ts` already covers the beacon. The injected tag needs no
+          nonce: it is created by a nonced script, and `'strict-dynamic'`
+          trusts what a trusted script creates. Off Vercel the script 404s and
+          the component stays silent.
+        */}
+        <Analytics />
       </body>
     </html>
   );
