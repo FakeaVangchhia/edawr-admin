@@ -15,6 +15,7 @@ import {
   Panel,
   TableSkeleton,
   useToast,
+  TableRegion,
 } from '@/components/ui';
 import { ImageField } from '@/components/ui/ImageField';
 import { assetUrl, errorMessage } from '@/lib/api';
@@ -115,7 +116,7 @@ export default function CategoriesPage() {
             }
           />
         ) : (
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Categories table">
+          <TableRegion label="Categories table">
             <table className="table">
               <thead>
                 <tr>
@@ -194,7 +195,7 @@ export default function CategoriesPage() {
               onOffset={setOffset}
               noun="categories"
             />
-          </div>
+          </TableRegion>
         )}
       </Panel>
 

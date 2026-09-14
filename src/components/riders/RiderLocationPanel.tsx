@@ -3,7 +3,7 @@
 import { MapPin } from 'lucide-react';
 import Link from 'next/link';
 
-import { EmptyState, ErrorBanner, Panel, TableSkeleton } from '@/components/ui';
+import { EmptyState, ErrorBanner, Panel, TableRegion, TableSkeleton } from '@/components/ui';
 import { ageFromSeconds } from '@/lib/format';
 import { listRiderLocations } from '@/lib/queries';
 import { usePolling, useResource } from '@/lib/use-resource';
@@ -31,6 +31,11 @@ const REFRESH_MS = 10_000;
  * are the part a manager acts on, and they are legible now, on a laptop, with
  * no Google Cloud billing account and no change to the CSP in `src/proxy.ts`.
  * The map slots into this panel when the key exists.
+ *
+ * **Nothing reports a position yet.** The API and this panel are complete, but
+ * the rider app does not send `POST /api/delivery/location`, so today every row
+ * reads "Never reported". The note under the table says so, and comes out the
+ * day the rider app is taught to report.
  */
 export function RiderLocationPanel({ className }: { className?: string }) {
   const locations = useResource('rider-locations', (signal) => listRiderLocations(signal));
@@ -62,7 +67,7 @@ export function RiderLocationPanel({ className }: { className?: string }) {
           description="Nobody is on the roster yet, so there is nothing to track."
         />
       ) : (
-        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Active riders table">
+        <TableRegion label="Active riders table">
           <table className="table">
             <thead>
               <tr>
@@ -78,8 +83,14 @@ export function RiderLocationPanel({ className }: { className?: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableRegion>
       )}
+      {riders.length > 0 && live.length === 0 ? (
+        <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
+          Live positions arrive once the rider app reports them; until then every rider reads
+          &ldquo;Never reported&rdquo;.
+        </p>
+      ) : null}
     </Panel>
   );
 }

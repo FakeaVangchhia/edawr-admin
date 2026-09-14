@@ -8,10 +8,8 @@
  * console should — a second pricing engine in TypeScript will disagree with the
  * first one the day a fee changes.
  *
- * Note the console shows **exact** amounts, always. The rider app rounds to
- * whole rupees, which is a real bug: a basket ending in .50 produces a doorstep
- * argument and a till that will not reconcile. The console is the screen that
- * settles those arguments, so it shows what was actually charged.
+ * The console shows **exact** amounts, always: it is the screen that settles
+ * a doorstep argument about fifty paise, so it shows what was actually charged.
  */
 
 const INR_EXACT = new Intl.NumberFormat('en-IN', {
@@ -182,7 +180,7 @@ export function marginPercent(price: number, costPrice: number): number | null {
 }
 
 /** An ISO `YYYY-MM-DD` for a date input, in the viewer's local time. */
-export function isoDate(date: Date): string {
+function isoDate(date: Date): string {
   const offset = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 10);
 }

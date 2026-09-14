@@ -122,8 +122,7 @@ describe('authRequest', () => {
 
       const error = await settle(authRequest('/api/admins')).catch((e: unknown) => e);
 
-      expect((error as ApiError).isForbidden).toBe(true);
-      expect((error as ApiError).isUnauthenticated).toBe(false);
+      expect((error as ApiError).status).toBe(403);
       expect(readSession()).not.toBeNull();
       expect(expired).not.toHaveBeenCalled();
     });

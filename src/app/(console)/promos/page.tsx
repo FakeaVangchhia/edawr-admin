@@ -13,6 +13,7 @@ import {
   Panel,
   TableSkeleton,
   useToast,
+  TableRegion,
 } from '@/components/ui';
 import { PromoDrawer } from '@/components/promos/PromoDrawer';
 import { assetUrl, errorMessage } from '@/lib/api';
@@ -133,7 +134,7 @@ function Promos() {
             action={newButton}
           />
         ) : (
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Promotions table">
+          <TableRegion label="Promotions table">
             <table className="table">
               <thead>
                 <tr>
@@ -218,7 +219,7 @@ function Promos() {
               onOffset={setOffset}
               noun="promotions"
             />
-          </div>
+          </TableRegion>
         )}
       </Panel>
 

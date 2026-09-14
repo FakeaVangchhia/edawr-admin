@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { ConfirmDialog, Drawer, ErrorBanner, StatusBadge, useToast } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { advanceOrder, assignOrder, restockOrder } from '@/lib/queries';
-import { dateTime, minutes, money, phone as formatPhone } from '@/lib/format';
+import { dateTime, distanceKm, minutes, money, phone as formatPhone } from '@/lib/format';
 import { CANCELLABLE, FAILABLE, NEXT_STEPS, TERMINAL } from '@/lib/order-steps';
 import type { Order, StaffUser } from '@/types';
 
@@ -257,6 +257,9 @@ export function OrderDrawer({
               <Row label="Dispatched" value={dateTime(order.dispatched_at)} />
               <Row label="Delivered" value={dateTime(order.delivered_at)} />
               <Row label="Rider" value={order.rider?.name ?? 'Unassigned'} />
+              {order.rider ? (
+                <Row label="From rider's base" value={distanceKm(order.offered_distance_km)} />
+              ) : null}
             </dl>
 
             {order.cancellation_reason ? (

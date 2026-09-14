@@ -4,7 +4,7 @@
  * Deliberately not generated from the OpenAPI schema: the backend serves
  * `/api/schema`, but generating types would tie a build of this app to a
  * running instance of that one, and the two deploy separately. Hand-written
- * types are checked against `backend/api/serializers.py` by reading it.
+ * types are checked against `edawr-backend/api/serializers.py` by reading it.
  *
  * The split that matters most is repeated from the backend and is worth
  * restating: `Product` here is the **admin** shape and carries `cost_price`,
@@ -92,7 +92,8 @@ export interface Promo {
   title: string;
   subtitle: string | null;
   image_url: string | null;
-  /** A path on the storefront (`/category/dairy`), never a URL — the API refuses one. */
+  /** A storefront path (`/category/dairy`) or an allowlisted external destination —
+   *  `https://`, `http://`, `tel:` or `mailto:`. Anything else the API refuses. */
   link: string | null;
   sort_order: number;
   status: CatalogueStatus;
@@ -155,6 +156,9 @@ export interface Order {
   fulfilment_minutes: number | null;
   delivery_boy_id: number | null;
   rider: RiderSummary | null;
+  /** Straight-line km from the rider's base when dispatch chose them; null
+   *  when the order carried no position, or nobody has been assigned. */
+  offered_distance_km: number | null;
   items: OrderItem[];
   created_at: string;
   packed_at: string | null;

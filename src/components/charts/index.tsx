@@ -20,13 +20,12 @@
  * as interactive when it is not. So identity colours come from a validated
  * categorical palette, and the accent stays on the furniture.
  *
- * That accent used to be teal, and is now the brand amber. **Slot 2 is a
- * red-orange and the brand is a gold**, which is a wider gap than it sounds
- * (hue 18° against 42°, and the brand appears on this screen only as a solid
- * button) but a narrower one than teal gave. If a third series is ever added,
- * take it from the cool end rather than the warm one — and if these two ever
- * start reading as "the eDawr colour", re-run the validator before reaching for
- * a value that looks right.
+ * The accent is the brand amber. **Slot 2 is a red-orange and the brand is a
+ * gold**, which is a wider gap than it sounds (hue 18° against 42°, and the
+ * brand appears on this screen only as a solid button). If a third series is
+ * ever added, take it from the cool end rather than the warm one — and if
+ * these two ever start reading as "the eDawr colour", re-run the validator
+ * before reaching for a value that looks right.
  *
  * Both slots below were checked with the palette validator against this app's
  * actual surfaces (#ffffff light, #0f1423 dark), all-pairs, in both modes:

@@ -13,6 +13,7 @@ import {
   Panel,
   StatusBadge,
   TableSkeleton,
+  TableRegion,
 } from '@/components/ui';
 import { count, dateOnly, daysAgo, delta, money, moneyRounded, percent, relativeTime, today } from '@/lib/format';
 import { analyticsInventory, analyticsRevenue, analyticsSummary, listOrders } from '@/lib/queries';
@@ -208,7 +209,7 @@ export default function OverviewPage() {
             description="Every order placed so far has been delivered or cancelled."
           />
         ) : (
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Live orders table">
+          <TableRegion label="Live orders table">
             <table className="table">
               <thead>
                 <tr>
@@ -237,7 +238,7 @@ export default function OverviewPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableRegion>
         )}
       </Panel>
 

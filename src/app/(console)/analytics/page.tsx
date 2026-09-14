@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { BarChart, LineChart, OnTimeBar, StatTile } from '@/components/charts';
+import { DateRange, type DateRangeValue } from '@/components/ui/DateRange';
 import { EmptyState, PageHeader, Panel, ResourceErrors } from '@/components/ui';
 import {
   count,
@@ -32,11 +33,8 @@ const PRESETS = [
 ];
 
 export default function AnalyticsPage() {
-  const [from, setFrom] = useState(() => daysAgo(29));
-  const [to, setTo] = useState(() => today());
-
-  const range = useMemo(() => ({ from, to }), [from, to]);
-  const key = `${from}:${to}`;
+  const [range, setRange] = useState<DateRangeValue>(() => ({ from: daysAgo(29), to: today() }));
+  const key = `${range.from}:${range.to}`;
 
   const summary = useResource(`summary:${key}`, (signal) => analyticsSummary(range, signal));
   const revenue = useResource(`revenue:${key}`, (signal) => analyticsRevenue(range, signal));
@@ -49,11 +47,6 @@ export default function AnalyticsPage() {
   const categories = useResource(`cat:${key}`, (signal) => analyticsCategories(range, signal));
   const delivery = useResource(`del:${key}`, (signal) => analyticsDelivery(range, signal));
   const inventory = useResource('inventory', (signal) => analyticsInventory(signal));
-
-  function applyPreset(days: number) {
-    setFrom(daysAgo(days - 1));
-    setTo(today());
-  }
 
   const summaryData = summary.data;
   const deliveryData = delivery.data;
@@ -75,37 +68,7 @@ export default function AnalyticsPage() {
         title="Analytics"
         description="Revenue is booked when an order is placed, not when the cash arrives at the door."
         actions={
-          <div className="flex items-end gap-2">
-            {/* One row of filters above the charts, as a set. */}
-            <div className="flex rounded-[0.4rem] bg-raised p-0.5">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset.days}
-                  type="button"
-                  className="rounded-[0.3rem] px-2.5 py-1 text-xs font-medium text-ink-faint transition-colors hover:text-ink"
-                  onClick={() => applyPreset(preset.days)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <input
-              type="date"
-              className="field w-36"
-              aria-label="From date"
-              value={from}
-              max={to}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-            <input
-              type="date"
-              className="field w-36"
-              aria-label="To date"
-              value={to}
-              min={from}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </div>
+          <DateRange value={range} onChange={setRange} presets={PRESETS} />
         }
       />
 

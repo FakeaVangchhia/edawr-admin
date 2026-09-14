@@ -66,7 +66,7 @@ const WA_ME = 'https://wa.me/';
  * Anything else (already international, or not a number) comes back as its
  * digits and is left for `linkProblem` to judge.
  */
-export function normaliseDigits(value: string): string {
+function normaliseDigits(value: string): string {
   const digits = value.replace(/[^\d]/g, '');
   if (digits.length === 10) return `91${digits}`;
   if (digits.length === 12 && digits.startsWith('91')) return digits;

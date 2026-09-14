@@ -57,7 +57,7 @@ export function can(role: Role | null | undefined, capability: Capability): bool
   return !ADMIN_ONLY.has(capability);
 }
 
-/** Every capability, for exhaustive iteration in tests and in the nav. */
+/** Every capability, so the tests can prove each one is assigned to a role. */
 export const CAPABILITIES: readonly Capability[] = [
   'orders',
   'products',

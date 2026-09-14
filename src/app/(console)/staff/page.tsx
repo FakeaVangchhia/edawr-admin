@@ -15,6 +15,7 @@ import {
   Panel,
   TableSkeleton,
   useToast,
+  TableRegion,
 } from '@/components/ui';
 import { ApiError, errorMessage } from '@/lib/api';
 import { dateOnly, phone as formatPhone } from '@/lib/format';
@@ -25,11 +26,9 @@ import type { StaffUser } from '@/types';
 /**
  * Riders and store managers.
  *
- * **This screen has never existed before.** `POST /api/users` has been in the
- * API the whole time and no client called it, so the only way to create a rider
- * was `manage.py seed` — which deletes every row in the database first and
- * therefore cannot be run twice on a live store. A shop that lost a rider's PIN
- * had no way to reset it without shell access.
+ * The only client of `POST /api/users` and `PUT /api/users/{id}`: without this
+ * screen the way to add a rider is `manage.py seed`, which deletes every row
+ * first, and the way to reset a lost PIN is a shell.
  *
  * Note what this is *not*: console logins. Those are `/accounts`, they live in a
  * different table, and only an Admin may touch them. Riders are operational
@@ -164,14 +163,7 @@ export default function StaffPage() {
             }
           />
         ) : (
-          /* `tabIndex` and a named region, because a wide table scrolls
-              sideways and a plain `div` with `overflow-x-auto` cannot be
-              reached from the keyboard in Safari or Firefox. Every column
-              past the fold was then unreachable for anyone working this
-              console without a mouse — which, behind a counter, is a real
-              way to use it. Naming the region also stops a screen reader
-              announcing an anonymous scrollable box. */
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Riders table">
+          <TableRegion label="Riders table">
             <table className="table">
               <thead>
                 <tr>
@@ -242,7 +234,7 @@ export default function StaffPage() {
               onOffset={setOffset}
               noun="staff"
             />
-          </div>
+          </TableRegion>
         )}
       </Panel>
 
@@ -332,12 +324,8 @@ function StaffDrawer({
       onSaved(name.trim());
     } catch (caught) {
       if (caught instanceof ApiError) {
-        const fields = caught.fieldErrors;
-        if (fields) {
-          setFieldErrors(
-            Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.join(' ')])),
-          );
-        }
+        const fields = caught.fieldMessages;
+        if (fields) setFieldErrors(fields);
       }
       setError(errorMessage(caught));
     } finally {

@@ -5,26 +5,28 @@ management for Admins and Managers.
 
 ## Where this sits
 
-eDawr is four applications; two of them are versioned. This one is the console,
+eDawr is five applications, each its own repository. This one is the console,
 and it is deployed on its own:
 
-| | Versioned in | What it is |
+| | Repository | What it is |
 |---|---|---|
 | **Console** | `edawr-admin` (here) | Next.js 16, port 3001. Staff only. |
 | API | `edawr-backend` | Django 6 + DRF + PostgreSQL. **The only server.** |
-| Storefront + rider app | *nothing* | The customer web store and the Expo rider app. They live beside this repository on the developer's disk, at `../frontend` and `../mobile`, and are not under version control. |
+| Storefront | `edawr-frontend` | The customer web store, Next.js 16, port 3000. |
+| Customer app | `edawr-app` | Expo, a port of the storefront. |
+| Rider app | `mobile/` | Expo, two screens. No remote. |
 
-The containing directory (`eDawr/`) is **not** a git repository. This one and
-`edawr-backend` are checked out inside it as subdirectories.
+The containing directory (`eDawr/`) is **not** a git repository; the five are
+checked out inside it side by side.
 
 A **separate application** from the storefront. The storefront sells; this is
 the instrument the shop is run with, and the two share no code, no design system
 and no deployment. They share only the API.
 
 Clone the API beside this one if you want to run the whole stack locally — the
-console serves no API routes of its own and does nothing without it. The shared
-deployment guide, `PRODUCTION.md`, sits at the root of that working directory
-and is not in any repository.
+console serves no API routes of its own and does nothing without it. The API's
+deployment guide is `deployment.md` in `edawr-backend`; the console deploys to
+Vercel from `master`.
 
 ```bash
 npm install

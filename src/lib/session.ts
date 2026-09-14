@@ -1,17 +1,11 @@
 /**
  * The console's stored session.
  *
- * `localStorage`, not `sessionStorage`, and a different key from the
- * storefront's `edawr-admin-session`. Two reasons for the split, and the second
- * is the one that would bite:
- *
- * - A manager working a shift should not be signed out by closing a tab, which
- *   is precisely what `sessionStorage` does. The storefront console chose
- *   session storage for a screen you dip into; this is a screen you live in.
- * - The two apps deploy to different origins and therefore cannot see each
- *   other's storage anyway — but if they are ever served from one origin, a
- *   shared key would have them overwriting each other's sessions with
- *   differently-shaped objects.
+ * `localStorage`, not `sessionStorage`: a manager working a shift should not
+ * be signed out by closing a tab, which is precisely what `sessionStorage`
+ * does. The key is the console's own, distinct from the storefront's customer
+ * session, so the two apps could share an origin without overwriting each
+ * other's sessions with differently-shaped objects.
  *
  * **The stored role is a hint, not a permission.** It decides which navigation
  * to draw. Every request is re-authorised server-side against the database row,

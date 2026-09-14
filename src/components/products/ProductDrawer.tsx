@@ -193,12 +193,8 @@ export function ProductDrawer({
       onSaved({ name: form.name.trim(), created: product === null, changed: true });
     } catch (caught) {
       if (caught instanceof ApiError) {
-        const fields = caught.fieldErrors;
-        if (fields) {
-          setFieldErrors(
-            Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.join(' ')])),
-          );
-        }
+        const fields = caught.fieldMessages;
+        if (fields) setFieldErrors(fields);
       }
       setError(errorMessage(caught));
     } finally {

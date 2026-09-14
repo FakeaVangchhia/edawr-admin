@@ -3,7 +3,7 @@
  *
  * Components call these rather than `authRequest('/api/...')` directly, so the
  * set of endpoints this app depends on can be read in one place — which is also
- * the list to check against `backend/api/urls.py` after a backend change.
+ * the list to check against `edawr-backend/api/urls.py` after a backend change.
  */
 
 import { authPage, authRequest, publicRequest, query } from '@/lib/api';
@@ -119,11 +119,9 @@ export function createProduct(body: Partial<Product>) {
  * The only way to edit a product.
  *
  * PATCH writes only the fields sent, under a row lock, so a sale landing while
- * the editor was open is not overwritten. There is deliberately no
- * `replaceProduct` beside it any more: `PUT /api/products/{id}` was removed
- * from the API because a full-row replace writes a stale `stock` back over
- * concurrent decrements — atomically or otherwise. The helper outlived the
- * endpoint by one commit and would have returned 405 to whoever called it next.
+ * the editor was open is not overwritten. There is deliberately no PUT: a
+ * full-row replace writes a stale `stock` back over concurrent decrements,
+ * atomically or otherwise, so the API does not offer one.
  */
 export function updateProduct(id: number, body: Partial<Product>) {
   return authRequest<Product>(`/api/products/${id}`, { method: 'PATCH', body });
@@ -146,13 +144,8 @@ export async function uploadProductImage(file: File): Promise<string> {
 /* --- categories ---------------------------------------------------------- */
 
 /**
- * Categories, paged.
- *
- * `limit: 200` used to be hardcoded with no offset, which is a page-one-only
- * list wearing the clothes of a complete one: `X-Total-Count` reported the true
- * total while the table showed at most 200 rows, so a store past that saw a
- * count it could not reach. `limit` and `offset` are now the caller's, and the
- * default is a screenful.
+ * Categories, paged. `limit` and `offset` are the caller's; a hardcoded page
+ * would be a page-one-only list wearing the clothes of a complete one.
  */
 export function listCategories(
   params: { q?: string; limit?: number; offset?: number } = {},
@@ -393,27 +386,27 @@ export function listAudit(filters: AuditFilters = {}, signal?: AbortSignal) {
 
 /* --- analytics ------------------------------------------------------------ */
 
-export interface Window {
+export interface DateWindow {
   from?: string;
   to?: string;
 }
 
-export function analyticsSummary(range: Window = {}, signal?: AbortSignal) {
+export function analyticsSummary(range: DateWindow = {}, signal?: AbortSignal) {
   return authRequest<AnalyticsSummary>(`/api/analytics/summary${query({ ...range })}`, { signal });
 }
 
-export function analyticsRevenue(range: Window = {}, signal?: AbortSignal) {
+export function analyticsRevenue(range: DateWindow = {}, signal?: AbortSignal) {
   return authRequest<RevenuePoint[]>(`/api/analytics/revenue${query({ ...range })}`, { signal });
 }
 
 export function analyticsProducts(
-  range: Window & { limit?: number; direction?: 'top' | 'bottom' } = {},
+  range: DateWindow & { limit?: number; direction?: 'top' | 'bottom' } = {},
   signal?: AbortSignal,
 ) {
   return authRequest<TopProduct[]>(`/api/analytics/products${query({ ...range })}`, { signal });
 }
 
-export function analyticsCategories(range: Window = {}, signal?: AbortSignal) {
+export function analyticsCategories(range: DateWindow = {}, signal?: AbortSignal) {
   return authRequest<CategoryShare[]>(`/api/analytics/categories${query({ ...range })}`, { signal });
 }
 
@@ -424,11 +417,11 @@ export function analyticsCategories(range: Window = {}, signal?: AbortSignal) {
  * one analytics endpoint that does — so an order placed at 23:50 and delivered
  * at 00:05 reconciles against the day the money reached the shop.
  */
-export function analyticsCash(range: Window = {}, signal?: AbortSignal) {
+export function analyticsCash(range: DateWindow = {}, signal?: AbortSignal) {
   return authRequest<CashReconciliation>(`/api/analytics/cash${query({ ...range })}`, { signal });
 }
 
-export function analyticsDelivery(range: Window = {}, signal?: AbortSignal) {
+export function analyticsDelivery(range: DateWindow = {}, signal?: AbortSignal) {
   return authRequest<DeliveryPerformance>(`/api/analytics/delivery${query({ ...range })}`, { signal });
 }
 

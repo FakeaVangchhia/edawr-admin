@@ -11,16 +11,12 @@ const THEME_KEY = 'edawr-console-theme';
 /**
  * The theme preference, stored and applied to `<html data-theme>`.
  *
- * **Two states, and light is the default.** There used to be a third, "system",
- * which meant "no attribute, let `prefers-color-scheme` decide". That option is
- * gone along with the media query it depended on: white is the console's main
- * theme now, so following the operating system would hand a dark console to
- * everyone whose laptop happens to be set that way — the exact default the
- * change was made to stop.
- *
- * Removing it rather than leaving it in place was the point. A "System" button
- * that quietly resolved to light whatever the system said would be a control
- * that lies, which is worse than one fewer choice.
+ * **Two states, and light is the default.** There is deliberately no "system"
+ * option and no `prefers-color-scheme` rule: white is the console's main
+ * theme, and following the operating system would hand a dark console to
+ * everyone whose laptop happens to be set that way. A "System" button that
+ * quietly resolved to light whatever the system said would be a control that
+ * lies, which is worse than one fewer choice.
  *
  * Light is still represented by the *absence* of the attribute rather than by
  * `data-theme="light"`, because absence is what the stylesheet already treats

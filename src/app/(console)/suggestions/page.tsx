@@ -10,6 +10,7 @@ import {
   Pagination,
   Panel,
   TableSkeleton,
+  TableRegion,
 } from '@/components/ui';
 import { dateTime, phone } from '@/lib/format';
 import { listSuggestions } from '@/lib/queries';
@@ -64,7 +65,7 @@ function Suggestions() {
             description="The sticker on the storefront home collects these. Answers appear here the moment a customer sends one."
           />
         ) : (
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Suggestions table">
+          <TableRegion label="Suggestions table">
             <table className="table">
               <thead>
                 <tr>
@@ -103,7 +104,7 @@ function Suggestions() {
               onOffset={setOffset}
               noun="suggestions"
             />
-          </div>
+          </TableRegion>
         )}
       </Panel>
     </>

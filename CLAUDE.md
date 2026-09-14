@@ -13,26 +13,20 @@ The console is Next.js 16 (App Router, React 19, Tailwind v4) on **port 3001**,
 with its own design system and its own deployment. **UI only — it serves no API
 routes.**
 
-It was split out of the eDawr monorepo, which no longer exists as a repository.
-What surrounds it now:
+Every application is its own repository, checked out side by side:
 
-- `edawr-backend` — Django 6 + DRF + PostgreSQL. **This is the API**, and the
-only place business rules live. Checked out beside this one, at `../backend`.
-- `../frontend` **and** `../mobile` — the customer storefront and the Expo rider
-app. They are **not under version control**: no repository, no history, no
-rollback. Their last committed state is archived in a bundle file on the
-developer's disk.
-- `../PRODUCTION.md` — still the single deployment guide for all four
-applications. It is a plain file in an unversioned directory, so it is worth
-reading with the possibility in mind that it has drifted.
+- `../edawr-backend` — Django 6 + DRF + PostgreSQL. **This is the API**, and the
+only place business rules live. Its `deployment.md` is the API's runbook.
+- `../edawr-frontend` — the customer storefront (Next.js 16).
+- `../customer-app` — the customer app (Expo), a port of the storefront.
+- `../mobile` — the Expo rider app. Two commits and no remote.
 
 The containing directory is not a git repository and must not become one. Run
-git only from inside this repository or `../backend`.
+git only from inside an application directory.
 
 The console and the storefront share no code, no design system and no
 deployment. They share only the API. If you find yourself copying a component
-between them, that is a decision to make deliberately, not a refactor — and the
-copy in `../frontend` has no history to trace it back to.
+between them, that is a decision to make deliberately, not a refactor.
 
 ## Commands
 
@@ -81,6 +75,7 @@ that offers an impossible transition produces a 409, not a validation message.
 ```
 Placed → Packing → Ready → Dispatched → Delivered
    └────────┴────────┴──────────────────→ Cancelled
+                Ready → Packing           (bag reopened)
                        Dispatched → Ready    (rider hands it back)
                        Dispatched → Failed   (attempted, did not happen)
 ```
@@ -169,7 +164,8 @@ nothing in any server log. It is the first thing to check when nothing loads.
 `react-hooks/set-state-in-effect` is an error here, and the fix is structural
 rather than a suppression: tag fetched data with the query that produced it and
 **derive** the loading flag, and refresh by bumping a token from an event
-handler. See `ManagerDashboard.tsx`.
+handler. See `src/lib/use-resource.ts`, and the tagged draft in
+`src/app/(console)/settings/page.tsx`.
 
 
 

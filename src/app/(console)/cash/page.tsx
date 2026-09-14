@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { StatTile } from '@/components/charts';
-import { EmptyState, ErrorBanner, PageHeader, Panel, TableSkeleton } from '@/components/ui';
+import { DateRange, type DateRangeValue } from '@/components/ui/DateRange';
+import { EmptyState, ErrorBanner, PageHeader, Panel, TableRegion, TableSkeleton } from '@/components/ui';
 import { count, dateOnly, daysAgo, money, today } from '@/lib/format';
 import { analyticsCash } from '@/lib/queries';
 import { useResource } from '@/lib/use-resource';
@@ -36,19 +37,13 @@ const PRESETS = [
 ];
 
 export default function CashPage() {
-  const [from, setFrom] = useState(() => daysAgo(6));
-  const [to, setTo] = useState(() => today());
-
-  const range = useMemo(() => ({ from, to }), [from, to]);
-  const cash = useResource(`cash:${from}:${to}`, (signal) => analyticsCash(range, signal));
+  const [range, setRange] = useState<DateRangeValue>(() => ({ from: daysAgo(6), to: today() }));
+  const cash = useResource(`cash:${range.from}:${range.to}`, (signal) =>
+    analyticsCash(range, signal),
+  );
 
   const data = cash.data;
   const short = (data?.shortfall ?? 0) > 0;
-
-  function applyPreset(days: number) {
-    setFrom(daysAgo(days - 1));
-    setTo(today());
-  }
 
   return (
     <>
@@ -56,36 +51,7 @@ export default function CashPage() {
         title="Cash"
         description="Counted by when the money reached the shop, not when the order was placed."
         actions={
-          <div className="flex items-end gap-2">
-            <div className="flex rounded-[0.4rem] bg-raised p-0.5">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset.days}
-                  type="button"
-                  className="rounded-[0.3rem] px-2.5 py-1 text-xs font-medium text-ink-faint transition-colors hover:text-ink"
-                  onClick={() => applyPreset(preset.days)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <input
-              type="date"
-              className="field w-36"
-              aria-label="From date"
-              value={from}
-              max={to}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-            <input
-              type="date"
-              className="field w-36"
-              aria-label="To date"
-              value={to}
-              min={from}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </div>
+          <DateRange value={range} onChange={setRange} presets={PRESETS} />
         }
       />
 
@@ -138,7 +104,7 @@ export default function CashPage() {
               description="Deliveries in this window will appear here with what each rider took."
             />
           ) : (
-            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Cash by rider table">
+            <TableRegion label="Cash by rider table">
               <table className="table">
                 <thead>
                   <tr>
@@ -176,7 +142,7 @@ export default function CashPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableRegion>
           )}
         </Panel>
 
@@ -186,7 +152,7 @@ export default function CashPage() {
           ) : (data?.days.length ?? 0) === 0 ? (
             <EmptyState title="No deliveries in this window" />
           ) : (
-            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Cash by day table">
+            <TableRegion label="Cash by day table">
               <table className="table">
                 <thead>
                   <tr>
@@ -215,7 +181,7 @@ export default function CashPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableRegion>
           )}
         </Panel>
       </div>

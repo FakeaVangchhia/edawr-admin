@@ -26,7 +26,7 @@ import { clsx } from 'clsx';
 /* Re-exported so every screen still imports its UI from one place. The toast
    lives in its own file because it is a provider that owns a queue, and
    everything else here is presentational and stateless. */
-export { ToastProvider, useToast, type Toaster } from './toast';
+export { ToastProvider, useToast } from './toast';
 
 /* --- layout -------------------------------------------------------------- */
 
@@ -154,6 +154,24 @@ export function ResourceErrors({
       {failed.map((resource, index) => (
         <ErrorBanner key={index} message={resource.error} onRetry={resource.refresh} />
       ))}
+    </div>
+  );
+}
+
+/**
+ * The scrollable box around every wide table.
+ *
+ * `tabIndex` and a named region, because a wide table scrolls sideways and a
+ * plain `div` with `overflow-x-auto` cannot be reached from the keyboard in
+ * Safari or Firefox — every column past the fold is then unreachable for
+ * anyone working this console without a mouse, which, behind a counter, is a
+ * real way to use it. Naming the region also stops a screen reader announcing
+ * an anonymous scrollable box.
+ */
+export function TableRegion({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={label}>
+      {children}
     </div>
   );
 }

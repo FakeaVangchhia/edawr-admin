@@ -16,6 +16,7 @@ import {
   StatusBadge,
   TableSkeleton,
   useToast,
+  TableRegion,
 } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { dateTime, money, phone as formatPhone, relativeTime } from '@/lib/format';
@@ -119,10 +120,9 @@ function OrdersScreen() {
 
   // Poll the board, not the table. A live fulfilment board has to be current;
   // a filtered history from last Tuesday does not change while you read it.
-  // `orders.refresh` is already stable — a useCallback with no dependencies,
-  // inside useResource. Wrapping it in another useCallback keyed on `orders`,
-  // which is a new object every render, was what made it unstable, and an
-  // unstable callback used to restart the interval on every keystroke.
+  // `orders.refresh` is already stable (see use-resource.ts); wrapping it in a
+  // useCallback keyed on `orders`, a new object every render, would restart
+  // the interval on every keystroke.
   const refresh = orders.refresh;
   usePolling(refresh, 15_000, isBoard);
 
@@ -337,14 +337,7 @@ function OrdersScreen() {
             />
           ) : (
             <>
-              {/* `tabIndex` and a named region, because a wide table scrolls
-                  sideways and a plain `div` with `overflow-x-auto` cannot be
-                  reached from the keyboard in Safari or Firefox. Every column
-                  past the fold was then unreachable for anyone working this
-                  console without a mouse — which, behind a counter, is a real
-                  way to use it. Naming the region also stops a screen reader
-                  announcing an anonymous scrollable box. */}
-              <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Orders table">
+              <TableRegion label="Orders table">
                 <table className="table">
                   <thead>
                     <tr>
@@ -380,7 +373,7 @@ function OrdersScreen() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableRegion>
               <Pagination
                 total={total}
                 limit={PAGE_SIZE}

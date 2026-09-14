@@ -176,17 +176,11 @@
   --color-accent-strong: var(--c-accent-strong);
   --color-accent-quiet: var(--c-accent-quiet);
 
-  /* `bg-brand` / `text-on-brand` are a matched pair and should be used as one.
-     There is deliberately no `text-brand`: amber ink is the mistake decision 4
-     exists to prevent, and a utility class is how it would get made.
-
-     There is also no `on-accent` any more. It paired with an accent that was a
-     *fill*; this one is a text colour, so nothing sits on top of it and a token
-     that names a relationship which no longer exists is worse than no token. */
-  --color-brand: var(--c-brand);
-  --color-brand-strong: var(--c-brand-strong);
-  --color-brand-edge: var(--c-brand-edge);
-  --color-on-brand: var(--c-on-brand);
+  /* The brand colour is deliberately *not* a Tailwind token. It appears on
+     exactly one surface — `.btn-primary` below, which reads `--c-brand` and
+     `--c-on-brand` directly — and amber ink anywhere else is the mistake
+     decision 4 exists to prevent. A `text-brand` utility is how it would get
+     made. */
 
   --color-ok: var(--c-ok);
   --color-ok-quiet: var(--c-ok-quiet);

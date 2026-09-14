@@ -71,7 +71,7 @@ const securityHeaders = [
   // checkout; nothing here has any use for a camera, a microphone or a position.
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+    value: "camera=(), microphone=(), geolocation=()",
   },
   // Not a shop. Keeping it out of search results costs nothing and removes a
   // login page from the public index.

@@ -1,13 +1,8 @@
 /**
  * The single fetch layer for the console.
  *
- * Ported from the storefront's `lib/api.ts`, which is well-shaped, plus the one
- * thing it is missing: **an interceptor that distinguishes 401 from 403.**
- *
- * In the storefront console those two are conflated (`isUnauthorized` returns
- * true for both) and the helper is never called at all, so a token that expires
- * mid-shift produces a red banner and a poll that keeps failing every fifteen
- * seconds forever. Here:
+ * The same shape as the storefront's `lib/api.ts`, and the one rule that
+ * matters most is the same: **401 and 403 mean different things.**
  *
  *   401 -> the server does not know who you are. Clear the session, go to
  *          /login. This is the *only* condition that ends a session.
@@ -16,13 +11,13 @@
  *          must be told no, not signed out.
  *
  * That distinction is a documented contract on the backend — `IsOwnerAdmin`
- * returns 403 deliberately, and the rider app's habit of treating them alike is
- * the bug that signs riders out mid-delivery. It is not repeated here.
+ * returns 403 deliberately.
  *
- * Equally important: the session is cleared *only* on a real 401. Never in a
- * bare `catch`. A network blip, a CORS misconfiguration or a CSP block all land
- * in the same catch as an auth failure, and deleting a perfectly valid token
- * because the wifi dropped is how the storefront's `/admin` page loses sessions.
+ * Equally important: the session is cleared *only* on a real 401 to a request
+ * that carried a token. Never in a bare `catch`: a network blip, a CORS
+ * misconfiguration or a CSP block all land in the same catch as an auth
+ * failure, and deleting a perfectly valid token because the wifi dropped is
+ * how a manager gets signed out mid-shift.
  */
 
 import { clearSession, readToken } from '@/lib/session';
@@ -58,11 +53,9 @@ const MEDIA_BASE_URL =
  * Product and category images are stored as relative paths ("/uploads/x.png"),
  * so the hostname is never baked into the database. This puts one back.
  *
- * **Which host is the question this answers.** The API used to serve the files
- * itself off a mounted disk; they now live in a Cloudflare R2 bucket, and the
- * browser fetches them straight from it. The stored path did not change — the
- * R2 object key is that same path without its leading slash — so the whole
- * migration lands here, in which base gets prefixed.
+ * **Which host is the question this answers.** The files live in a Cloudflare
+ * R2 bucket and the browser fetches them straight from it; the R2 object key
+ * is the stored path without its leading slash, so only the base differs.
  *
  * Absolute values pass through untouched: seeded placeholders on someone
  * else's CDN still work, and so would a future where the API returns whole
@@ -88,35 +81,22 @@ export class ApiError extends Error {
     this.payload = payload;
   }
 
-  /** The session is gone or was never valid. The only logout trigger. */
-  get isUnauthenticated(): boolean {
-    return this.status === 401;
-  }
-
-  /** Identified, and not permitted. Never a reason to log anybody out. */
-  get isForbidden(): boolean {
-    return this.status === 403;
-  }
-
-  /** A conflict with the state of the resource — an illegal status move, a
-   *  product still referenced by an order, the last Admin being demoted. */
-  get isConflict(): boolean {
-    return this.status === 409;
+  /**
+   * `fieldErrors`, one sentence per field, for showing under an input.
+   */
+  get fieldMessages(): Record<string, string> | null {
+    const fields = this.fieldErrors;
+    if (!fields) return null;
+    return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.join(' ')]));
   }
 
   /**
    * Field-level errors from a DRF serializer, if the failure carried any.
    *
-   * **Looks under `errors` first**, because that is where this API actually
-   * puts them. `api/exceptions.py::detail_exception_handler` rewrites every
-   * validation failure to `{"detail": "<one sentence>", "errors": {...}}` —
-   * so scanning only the top level for array values, which is what this used
-   * to do, found nothing on every real response and quietly returned null
-   * forever. No screen broke; they simply never got the per-field messages the
-   * getter exists to supply, and showed the flattened sentence instead.
-   *
-   * The top-level scan is kept as a fallback for a body that predates that
-   * handler or comes from somewhere else.
+   * **Looks under `errors` first**, because that is where this API puts them:
+   * `api/exceptions.py::detail_exception_handler` rewrites every validation
+   * failure to `{"detail": "<one sentence>", "errors": {...}}`. The top-level
+   * scan is a fallback for a body that comes from somewhere else.
    */
   get fieldErrors(): Record<string, string[]> | null {
     if (!this.payload || typeof this.payload !== 'object') return null;
@@ -158,7 +138,7 @@ export function setSessionExpiredHandler(handler: ExpiryHandler | null): void {
   onSessionExpired = handler;
 }
 
-export interface RequestOptions extends Omit<RequestInit, 'body'> {
+interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
 }
 
@@ -304,6 +284,7 @@ async function send(
     }
   }
 
+  // Every path through the loop returns or throws; this satisfies the type.
   throw last;
 }
 
