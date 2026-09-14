@@ -24,6 +24,7 @@ function LoginForm() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -136,7 +137,7 @@ function LoginForm() {
               </label>
               <input
                 id="password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 className="field"
                 autoComplete="current-password"
                 value={password}
@@ -144,6 +145,20 @@ function LoginForm() {
                 disabled={submitting}
               />
             </div>
+
+            {/* A checkbox rather than an eye icon inside the field: it is the
+                one control on this page a screen reader names correctly with
+                no extra work, and the person typing a long password at 6am on
+                a phone wants to see it, not to hunt a 16px glyph. */}
+            <label className="flex items-center gap-1.5 text-sm text-ink-soft">
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(event) => setShowPassword(event.target.checked)}
+                disabled={submitting}
+              />
+              Show password
+            </label>
           </div>
 
           {/* Always mounted, only its text changes, so screen readers actually

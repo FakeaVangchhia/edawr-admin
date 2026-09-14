@@ -23,9 +23,11 @@ const MANAGER_ALLOWED: Capability[] = [
   'orders',
   'products',
   'categories',
+  'promos',
   'staff',
   'analytics',
   'settings',
+  'suggestions',
 ];
 
 describe('can()', () => {

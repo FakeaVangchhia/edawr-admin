@@ -82,6 +82,35 @@ export interface Category {
   created_at?: string;
 }
 
+/**
+ * A banner on the storefront home. Managed here, read by the storefront via a
+ * public endpoint that strips `status` and the window — what a customer sees
+ * is decided server-side by `Promo.live()`.
+ */
+export interface Promo {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  image_url: string | null;
+  /** A path on the storefront (`/category/dairy`), never a URL — the API refuses one. */
+  link: string | null;
+  sort_order: number;
+  status: CatalogueStatus;
+  starts_at: string | null;
+  ends_at: string | null;
+  created_at?: string;
+}
+
+/** One answer to the storefront's poll sticker. Read-only: nothing edits these. */
+export interface Suggestion {
+  id: number;
+  text: string;
+  /** The account's number when the customer was signed in; null for a guest. */
+  customer_phone: string | null;
+  customer_name: string | null;
+  created_at: string;
+}
+
 export interface OrderItem {
   id: number;
   product_id: number | null;

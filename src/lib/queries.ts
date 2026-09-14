@@ -13,6 +13,8 @@ import type {
   AuditEntry,
   CategoryShare,
   Category,
+  Promo,
+  Suggestion,
   ConsoleSession,
   CashReconciliation,
   DeliveryPerformance,
@@ -198,6 +200,55 @@ export function categoryPutBody(
     sort_order: merged.sort_order ?? 0,
     status: merged.status ?? 'active',
   };
+}
+
+/* --- promotions ---------------------------------------------------------- */
+
+export function listPromos(
+  params: { q?: string; status?: string; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+) {
+  return authPage<Promo>(`/api/promos${query({ limit: 50, ...params })}`, { signal });
+}
+
+export function createPromo(body: Partial<Promo>) {
+  return authRequest<Promo>('/api/promos', { method: 'POST', body });
+}
+
+/** Not partial, like the category PUT — send the whole row via `promoPutBody`. */
+export function updatePromo(id: number, body: Partial<Promo>) {
+  return authRequest<Promo>(`/api/promos/${id}`, { method: 'PUT', body });
+}
+
+export function deletePromo(id: number) {
+  return authRequest<{ success: boolean }>(`/api/promos/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * A complete body for the non-partial promo PUT. Same reason as
+ * `categoryPutBody`: an omitted `image_url` or window is reset, not kept.
+ */
+export function promoPutBody(promo: Promo, changes: Partial<Promo>): Record<string, unknown> {
+  const merged = { ...promo, ...changes };
+  return {
+    title: merged.title,
+    subtitle: merged.subtitle ?? null,
+    image_url: merged.image_url ?? null,
+    link: merged.link ?? null,
+    sort_order: merged.sort_order ?? 0,
+    status: merged.status ?? 'active',
+    starts_at: merged.starts_at ?? null,
+    ends_at: merged.ends_at ?? null,
+  };
+}
+
+/* --- suggestions --------------------------------------------------------- */
+
+export function listSuggestions(
+  params: { limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+) {
+  return authPage<Suggestion>(`/api/suggestions${query({ limit: 50, ...params })}`, { signal });
 }
 
 /* --- orders -------------------------------------------------------------- */
