@@ -19,7 +19,7 @@ import type { AuditEntry } from '@/types';
 
 const PAGE_SIZE = 40;
 
-const ENTITIES = ['', 'product', 'category', 'order', 'staff', 'admin'];
+const ENTITIES = ['', 'product', 'category', 'promo', 'order', 'staff', 'admin'];
 const ACTIONS = ['', 'create', 'update', 'delete', 'status', 'assign', 'cancel'];
 
 const ACTION_TONE: Record<string, string> = {

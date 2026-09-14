@@ -21,9 +21,13 @@ export type Capability =
   | 'orders'
   | 'products'
   | 'categories'
+  /** The banners on the storefront home. */
+  | 'promos'
   | 'staff'
   | 'analytics'
   | 'settings'
+  /** What customers typed into the storefront's poll sticker. */
+  | 'suggestions'
   /** Console logins and role assignment. */
   | 'accounts'
   /** The record of what everyone did. */
@@ -58,9 +62,11 @@ export const CAPABILITIES: readonly Capability[] = [
   'orders',
   'products',
   'categories',
+  'promos',
   'staff',
   'analytics',
   'settings',
+  'suggestions',
   'accounts',
   'audit',
 ] as const;

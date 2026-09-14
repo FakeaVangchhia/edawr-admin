@@ -117,7 +117,18 @@ request rather than when a token expires. Never treat the guard as security.
 - **Editing a product sends** `PATCH`**, not** `PUT`**.** PUT writes every column from a
 body assembled when the form opened, so a sale during the edit is overwritten.
 - **The category** `PUT` **is not partial.** Use `categoryPutBody()`; omitting a
-field resets it.
+field resets it. The promotion `PUT` is the same; use `promoPutBody()`.
+- **A promotion's** `link` **is a storefront path or an allowlisted external
+destination** — `https://`/`http://`, `tel:`, `mailto:`; anything else
+(`javascript:`, `data:`, protocol-relative `//…`) is a 400, because a banner is
+the biggest tap target on the home page and every Manager can edit it. The
+form never shows that string: `src/lib/promo-link.ts` turns a destination
+*kind* plus a value into it (WhatsApp is `https://wa.me/91…`) and back again
+for the edit drawer, so a Manager types a number. The storefront reads banners through
+public `GET /api/store/promos`, which applies the window and strips `status`
+and the dates; `/api/promos` is the console's view only.
+- **Suggestions are write-once.** `/api/suggestions` is a read; the poll
+sticker on the storefront writes them and nothing edits or deletes one.
 - Error responses are always `{"detail": "..."}`. A bad body is **400**, not 422.
 - URLs carry **no trailing slash** — the API sets `APPEND_SLASH = False`, because
 a redirected POST loses its body.
@@ -126,7 +137,10 @@ a redirected POST loses its body.
 images live in, which is why it never changed when they moved off the API's
 disk. `assetUrl()` prefixes `NEXT_PUBLIC_MEDIA_URL`, falling back to
 `NEXT_PUBLIC_API_URL` when it is unset — correct while the backend runs
-`UPLOAD_BACKEND=local`.
+`UPLOAD_BACKEND=local`, and **wrong the moment it runs `r2`**: the API has never
+seen those bytes, so every image 404s while the upload itself succeeded. Setting
+the variable is a rebuild, not a restart. `manage.py check_uploads --public` on
+the API side is what proves the pair is consistent.
 
 
 

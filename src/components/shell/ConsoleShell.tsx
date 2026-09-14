@@ -6,7 +6,9 @@ import {
   Boxes,
   ClipboardList,
   LayoutDashboard,
+  Megaphone,
   Menu,
+  MessageSquareText,
   Moon,
   ScrollText,
   Settings,
@@ -47,11 +49,13 @@ const NAV: NavItem[] = [
   { href: '/orders', label: 'Orders', icon: ClipboardList, capability: 'orders' },
   { href: '/products', label: 'Products', icon: Boxes, capability: 'products' },
   { href: '/categories', label: 'Categories', icon: Tags, capability: 'categories' },
+  { href: '/promos', label: 'Promotions', icon: Megaphone, capability: 'promos' },
   { href: '/staff', label: 'Staff', icon: Users, capability: 'staff' },
   { href: '/analytics', label: 'Analytics', icon: BarChart3, capability: 'analytics' },
   // Not Admin-only, and no new capability: reconciling the till is how a
   // Manager runs the store, the same reasoning that puts Settings here.
   { href: '/cash', label: 'Cash', icon: Banknote, capability: 'analytics' },
+  { href: '/suggestions', label: 'Suggestions', icon: MessageSquareText, capability: 'suggestions' },
   { href: '/settings', label: 'Settings', icon: Settings, capability: 'settings' },
 ];
 
