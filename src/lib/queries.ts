@@ -111,7 +111,16 @@ export function listProducts(filters: ProductFilters = {}, signal?: AbortSignal)
   return authPage<Product>(`/api/products${query({ ...filters })}`, { signal });
 }
 
-export function createProduct(body: Partial<Product>) {
+/**
+ * Everything a product write may carry. The three money columns are the
+ * strings the form holds — DRF parses them as Decimal, and the console never
+ * turns them into a float on the way.
+ */
+export type ProductInput = Partial<
+  Omit<Product, 'id' | 'created_at' | 'discount_percent' | 'price' | 'cost_price' | 'mrp'>
+> & { price?: string; cost_price?: string; mrp?: string };
+
+export function createProduct(body: ProductInput) {
   return authRequest<Product>('/api/products', { method: 'POST', body });
 }
 
@@ -123,7 +132,7 @@ export function createProduct(body: Partial<Product>) {
  * full-row replace writes a stale `stock` back over concurrent decrements,
  * atomically or otherwise, so the API does not offer one.
  */
-export function updateProduct(id: number, body: Partial<Product>) {
+export function updateProduct(id: number, body: ProductInput) {
   return authRequest<Product>(`/api/products/${id}`, { method: 'PATCH', body });
 }
 
@@ -154,7 +163,7 @@ export function listCategories(
   return authPage<Category>(`/api/categories${query({ limit: 50, ...params })}`, { signal });
 }
 
-export function createCategory(body: Partial<Category>) {
+export function createCategory(body: CategoryInput) {
   return authRequest<Category>('/api/categories', { method: 'POST', body });
 }
 
@@ -163,7 +172,7 @@ export function createCategory(body: Partial<Category>) {
  * default. Callers must send the whole row, which is what `categoryPutBody`
  * exists to build — omitting `image_url` or `sort_order` silently wipes them.
  */
-export function updateCategory(id: number, body: Partial<Category>) {
+export function updateCategory(id: number, body: CategoryInput) {
   return authRequest<Category>(`/api/categories/${id}`, { method: 'PUT', body });
 }
 
@@ -180,10 +189,10 @@ export function deleteCategory(id: number) {
  * `{name}` clears the category's image and resets its position in the rail.
  * Nothing errors; the rail just quietly loses its pictures.
  */
-export function categoryPutBody(
-  category: Category,
-  changes: Partial<Category>,
-): Record<string, unknown> {
+/** Everything a category PUT or POST may carry — the row minus what the API assigns. */
+export type CategoryInput = Partial<Omit<Category, 'id' | 'created_at'>>;
+
+export function categoryPutBody(category: Category, changes: CategoryInput): CategoryInput {
   const merged = { ...category, ...changes };
   return {
     name: merged.name,
@@ -204,12 +213,12 @@ export function listPromos(
   return authPage<Promo>(`/api/promos${query({ limit: 50, ...params })}`, { signal });
 }
 
-export function createPromo(body: Partial<Promo>) {
+export function createPromo(body: PromoInput) {
   return authRequest<Promo>('/api/promos', { method: 'POST', body });
 }
 
 /** Not partial, like the category PUT — send the whole row via `promoPutBody`. */
-export function updatePromo(id: number, body: Partial<Promo>) {
+export function updatePromo(id: number, body: PromoInput) {
   return authRequest<Promo>(`/api/promos/${id}`, { method: 'PUT', body });
 }
 
@@ -221,7 +230,10 @@ export function deletePromo(id: number) {
  * A complete body for the non-partial promo PUT. Same reason as
  * `categoryPutBody`: an omitted `image_url` or window is reset, not kept.
  */
-export function promoPutBody(promo: Promo, changes: Partial<Promo>): Record<string, unknown> {
+/** Everything a promo PUT or POST may carry — the row minus what the API assigns. */
+export type PromoInput = Partial<Omit<Promo, 'id' | 'created_at'>>;
+
+export function promoPutBody(promo: Promo, changes: PromoInput): PromoInput {
   const merged = { ...promo, ...changes };
   return {
     title: merged.title,

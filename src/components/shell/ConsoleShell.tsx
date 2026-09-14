@@ -155,10 +155,9 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const visible = NAV.filter((item) => !item.capability || can(session.role, item.capability));
-  const adminVisible = ADMIN_NAV.filter((item) =>
-    can(session.role, item.capability as Capability),
-  );
+  const allowed = (item: NavItem) => !item.capability || can(session.role, item.capability);
+  const visible = NAV.filter(allowed);
+  const adminVisible = ADMIN_NAV.filter(allowed);
 
   function signOut() {
     // Fire the server-side revocation, then leave immediately without waiting

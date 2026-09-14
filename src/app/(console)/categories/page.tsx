@@ -25,6 +25,7 @@ import {
   deleteCategory,
   listCategories,
   updateCategory,
+  type CategoryInput,
 } from '@/lib/queries';
 import { useResource } from '@/lib/use-resource';
 import type { Category } from '@/types';
@@ -264,7 +265,7 @@ function CategoryDrawer({
     setSaving(true);
     setError('');
     try {
-      const changes = {
+      const changes: CategoryInput = {
         name: name.trim(),
         description: description.trim() || null,
         parent_id: parentId ? Number(parentId) : null,
@@ -278,11 +279,11 @@ function CategoryDrawer({
         // its serializer default. `categoryPutBody` sends the whole row, which
         // is the only reason editing a name here does not silently wipe the
         // category's image and its position in the rail.
-        await updateCategory(category.id, categoryPutBody(category, changes) as Partial<Category>);
+        await updateCategory(category.id, categoryPutBody(category, changes));
       } else {
-        await createCategory(changes as Partial<Category>);
+        await createCategory(changes);
       }
-      onSaved(changes.name);
+      onSaved(changes.name ?? '');
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {

@@ -6,7 +6,7 @@ import { Drawer, ErrorBanner, Field } from '@/components/ui';
 import { ImageField } from '@/components/ui/ImageField';
 import { ApiError, errorMessage } from '@/lib/api';
 import { marginPercent } from '@/lib/format';
-import { createProduct, updateProduct } from '@/lib/queries';
+import { createProduct, updateProduct, type ProductInput } from '@/lib/queries';
 import type { Category, Product } from '@/types';
 
 /**
@@ -158,13 +158,15 @@ export function ProductDrawer({
       mrp: form.mrp || form.price || '0',
       stock: Number(form.stock || 0),
       reorder_level: Number(form.reorder_level || 0),
-      status: form.status,
+      // The <select> offers exactly the two values; a string from anywhere
+      // else is not one the API would accept.
+      status: form.status === 'inactive' ? 'inactive' : 'active',
       location: text(form.location),
       supplier_name: text(form.supplier_name),
       supplier_phone: text(form.supplier_phone),
       description: text(form.description),
       image_url: text(form.image_url),
-    } as unknown as Partial<Product>;
+    } satisfies ProductInput;
 
     // Assembling every column and PATCHing all of it is a PUT wearing a
     // different verb: `stock` would ride along at the value the form was seeded
@@ -174,7 +176,7 @@ export function ProductDrawer({
     // an untouched field is byte-identical and never reaches the request.
     const changed = Object.fromEntries(
       Object.entries(body).filter(([key]) => form[key] !== initial[key]),
-    ) as Partial<Product>;
+    ) as ProductInput;
 
     if (product && Object.keys(changed).length === 0) {
       // Nothing to write. Saving anyway would cost an audit row saying nobody

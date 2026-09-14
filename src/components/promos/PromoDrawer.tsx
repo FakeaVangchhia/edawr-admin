@@ -16,7 +16,7 @@ import {
   parseLink,
   type LinkKind,
 } from '@/lib/promo-link';
-import { createPromo, promoPutBody, updatePromo } from '@/lib/queries';
+import { createPromo, promoPutBody, updatePromo, type PromoInput } from '@/lib/queries';
 import type { Promo } from '@/types';
 
 /**
@@ -94,7 +94,7 @@ export function PromoDrawer({
     setSaving(true);
     setError('');
     try {
-      const changes: Partial<Promo> = {
+      const changes: PromoInput = {
         title: title.trim(),
         subtitle: subtitle.trim() || null,
         link: composeLink(linkKind, linkValue),
@@ -107,7 +107,7 @@ export function PromoDrawer({
 
       if (promo) {
         // Not partial — see `promoPutBody`.
-        await updatePromo(promo.id, promoPutBody(promo, changes) as Partial<Promo>);
+        await updatePromo(promo.id, promoPutBody(promo, changes));
       } else {
         await createPromo(changes);
       }
