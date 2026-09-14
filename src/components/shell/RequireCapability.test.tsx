@@ -7,12 +7,10 @@ import { clearSession, writeSession } from '@/lib/session';
 /**
  * The route guard, rendered.
  *
- * These are the first component tests in the repository — `@testing-library/react`
- * was never installed in the storefront, so its whole suite is pure logic and
- * nothing in `ManagerDashboard`, `ProductEditor` or `AdminLogin` is covered.
- * The guard is the right place to start: it is the piece where a mistake is
- * silent rather than loud, because getting it wrong shows a Manager a screen
- * that then fails one request at a time.
+ * Rendered with `@testing-library/react`, which this package installs and the
+ * storefront does not. The guard is the component most worth rendering: it is
+ * the piece where a mistake is silent rather than loud, because getting it
+ * wrong shows a Manager a screen that then fails one request at a time.
  *
  * Note what is being asserted: that the *message* is shown, not that access is
  * prevented. Prevention is the server's job and is tested there. If this file

@@ -111,10 +111,9 @@
 }
 
 /* --------------------------------------------------------------------------
-   Palette — dark. Applied only when someone has actively chosen it, which is
-   the entire difference from how this file used to work: there is no media
-   query, so no amount of operating-system preference turns the console dark on
-   its own.
+   Palette — dark. Applied only when someone has actively chosen it: there is
+   no media query, so no amount of operating-system preference turns the
+   console dark on its own.
 
    Kept in full, and kept to the same measured ratios as the light theme, because
    an opt-in nobody maintains is worse than no opt-in. A night shift in a

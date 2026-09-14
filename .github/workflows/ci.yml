@@ -42,9 +42,9 @@ jobs:
       - run: npm run lint
 
       # Before the tests, and separately from the build. `next build` does
-      # typecheck, but it is the slowest step in the job and it runs last — so
-      # a one-character type error used to cost a full production build before
-      # anything said so.
+      # typecheck, but it is the slowest step in the job and it runs last — a
+      # one-character type error should not cost a full production build
+      # before anything says so.
       - run: npx tsc --noEmit
 
       - run: npm test
