@@ -179,7 +179,11 @@ it in. The lint rule is disabled per-file with that reasoning.
 and the CSP names `/api/csp-report`. Both endpoints allowlist every field they
 log — an endpoint that logged whatever arrived would be a PII sink. Every
 reporter is written so it cannot throw and cannot block; it runs at the moment
-the app is already failing.
+the app is already failing. The console sends `location.pathname` as `route`
+because every console route is static; the storefront may not, because
+`/order/<token>` carries a credential, and the API redacts a tracking token out
+of every field it logs whatever a client sends. Both also send `release`, from
+`NEXT_PUBLIC_RELEASE` or Vercel's commit SHA, so a crash line names its build.
 - **Successes are toasts; failures stay inline.** Every write confirms itself
 through `useToast()` (`src/components/ui/toast.tsx`), mounted once in
 `(console)/layout.tsx`. Errors keep using `ErrorBanner` where they are: a

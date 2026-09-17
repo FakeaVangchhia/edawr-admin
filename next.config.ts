@@ -105,8 +105,37 @@ const productionOnlyHeaders =
       ]
     : [];
 
+/**
+ * Which build this is, for a crash report.
+ *
+ * `report-error.ts` sends `release` with every crash it reports, and the field
+ * answers the first question anyone asks of one: is this the deploy from an
+ * hour ago, or has it been broken all week? Left to the deployment dashboard it
+ * stays unset, because setting it is a thing somebody has to remember once and
+ * nothing complains about forgetting.
+ *
+ * Vercel exposes `VERCEL_GIT_COMMIT_SHA` to every build, so the value is
+ * already here — it just has to be named. Seven characters because that is what
+ * a person pastes into `git show`.
+ *
+ * The `env` key inlines it at build time, which is the same bargain as every
+ * other `NEXT_PUBLIC_` value: **changing it is a rebuild, not a restart**, and
+ * that is correct here, because the point is to describe the bundle the browser
+ * is running rather than whatever the server happens to be now.
+ *
+ * An explicit `NEXT_PUBLIC_RELEASE` wins, so another host — or a local build
+ * reproducing a customer's bug — can name its own. Unset everywhere yields an
+ * empty string, which the reporter omits; that is exactly today's behaviour and
+ * nothing regresses.
+ */
+const release =
+  process.env.NEXT_PUBLIC_RELEASE?.trim() ||
+  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ||
+  "";
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  env: { NEXT_PUBLIC_RELEASE: release },
   async headers() {
     return [
       { source: "/:path*", headers: [...securityHeaders, ...productionOnlyHeaders] },
