@@ -3,6 +3,7 @@
 import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { Changes } from '@/components/audit/Changes';
 import { RequireCapability } from '@/components/shell/RequireCapability';
 import {
   EmptyState,
@@ -16,7 +17,6 @@ import {
 import { capitalise, dateTime } from '@/lib/format';
 import { listAudit } from '@/lib/queries';
 import { resettingPage, useDebounced, useResource } from '@/lib/use-resource';
-import type { AuditEntry } from '@/types';
 
 const PAGE_SIZE = 40;
 
@@ -235,30 +235,5 @@ function Audit() {
         )}
       </Panel>
     </>
-  );
-}
-
-/**
- * The field-level diff.
- *
- * Passwords and PINs never reach this: the recorder strips anything named like
- * a credential, and a reset is recorded as `pin_reset: no → yes` instead. So
- * this renders whatever it is given without needing to know what is sensitive.
- */
-function Changes({ changes }: { changes: NonNullable<AuditEntry['changes']> }) {
-  const fields = Object.entries(changes);
-  if (fields.length === 0) return null;
-
-  return (
-    <ul className="mt-1 space-y-0.5">
-      {fields.map(([field, [before, after]]) => (
-        <li key={field} className="text-2xs text-ink-faint">
-          <span className="mono">{field}</span>{' '}
-          <span className="line-through">{before ?? '—'}</span>{' '}
-          <span aria-hidden="true">→</span>{' '}
-          <span className="text-ink">{after ?? '—'}</span>
-        </li>
-      ))}
-    </ul>
   );
 }

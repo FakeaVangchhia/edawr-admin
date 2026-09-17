@@ -208,7 +208,7 @@ function ProductsScreen() {
 
         {/* Shown only when something is set. Nothing to clear, nothing to read. */}
         {activeFilters > 0 ? (
-          <button type="button" className="btn btn-ghost h-[2.125rem]" onClick={clearFilters}>
+          <button type="button" className="btn btn-ghost h-[2.375rem]" onClick={clearFilters}>
             <X size={13} aria-hidden="true" />
             Clear {activeFilters} filter{activeFilters === 1 ? '' : 's'}
           </button>

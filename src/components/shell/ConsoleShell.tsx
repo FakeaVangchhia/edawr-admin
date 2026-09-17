@@ -366,7 +366,12 @@ function TopBar({
       <div className="ml-auto flex items-center gap-2.5">
         <div className="hidden text-right sm:block">
           <p className="text-xs font-semibold leading-tight">{name}</p>
-          <p className="text-2xs leading-tight text-ink-faint">{email}</p>
+          {/* Only when it adds something: an account with no name already
+              shows its email on the line above, and the same string twice
+              reads as a bug. */}
+          {name !== email ? (
+            <p className="text-2xs leading-tight text-ink-faint">{email}</p>
+          ) : null}
         </div>
         {/* Always visible. Which role you are signed in as changes what the
             buttons on every screen will do, so it should never be a thing you

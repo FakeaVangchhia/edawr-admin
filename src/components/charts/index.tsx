@@ -216,7 +216,7 @@ export function LineChart({
               x={padding.left - 8}
               y={scaleY(tick) + 3.5}
               textAnchor="end"
-              className="fill-[var(--c-ink-faint)] text-[10px]"
+              className="fill-[var(--c-ink-faint)] text-[11px]"
               style={{ fontVariantNumeric: 'tabular-nums' }}
             >
               {formatValue(tick)}
@@ -288,7 +288,7 @@ export function LineChart({
         <text
           x={padding.left}
           y={height - 6}
-          className="fill-[var(--c-ink-faint)] text-[10px]"
+          className="fill-[var(--c-ink-faint)] text-[11px]"
         >
           {points[0].label}
         </text>
@@ -296,7 +296,7 @@ export function LineChart({
           x={width - padding.right}
           y={height - 6}
           textAnchor="end"
-          className="fill-[var(--c-ink-faint)] text-[10px]"
+          className="fill-[var(--c-ink-faint)] text-[11px]"
         >
           {last.label}
         </text>

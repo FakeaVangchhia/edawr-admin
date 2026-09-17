@@ -270,7 +270,7 @@ function OrdersScreen() {
           </>
         ) : null}
 
-        <label className="flex h-[2.125rem] items-center gap-1.5 text-sm text-ink-soft">
+        <label className="flex h-[2.375rem] items-center gap-1.5 text-sm text-ink-soft">
           <input
             type="checkbox"
             checked={stalledOnly}
@@ -286,7 +286,7 @@ function OrdersScreen() {
         {activeFilters > 0 ? (
           <button
             type="button"
-            className="btn btn-ghost h-[2.125rem]"
+            className="btn btn-ghost h-[2.375rem]"
             onClick={clearFilters}
           >
             <X size={13} aria-hidden="true" />

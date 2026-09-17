@@ -32,10 +32,13 @@ const REFRESH_MS = 10_000;
  * no Google Cloud billing account and no change to the CSP in `src/proxy.ts`.
  * The map slots into this panel when the key exists.
  *
- * **Nothing reports a position yet.** The API and this panel are complete, but
- * the rider app does not send `POST /api/delivery/location`, so today every row
- * reads "Never reported". The note under the table says so, and comes out the
- * day the rider app is taught to report.
+ * **A rider reports only while carrying an order**, so "Never reported" is the
+ * ordinary state of an idle rider rather than a fault. The app asks for the
+ * position when an order reaches Dispatched and stops when it is handed over —
+ * which is what the API asks for (it answers `order_id: null` to mean stop) and
+ * is the only version of this a rider agreed to. A row that reads "Never
+ * reported" during a delivery is worth looking at; one that reads it between
+ * deliveries is working as designed.
  */
 export function RiderLocationPanel({ className }: { className?: string }) {
   const locations = useResource('rider-locations', (signal) => listRiderLocations(signal));
@@ -87,8 +90,8 @@ export function RiderLocationPanel({ className }: { className?: string }) {
       )}
       {riders.length > 0 && live.length === 0 ? (
         <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
-          Live positions arrive once the rider app reports them; until then every rider reads
-          &ldquo;Never reported&rdquo;.
+          A rider&rsquo;s phone reports only while they are carrying an order, so this reads
+          &ldquo;Never reported&rdquo; whenever nobody is out on a delivery.
         </p>
       ) : null}
     </Panel>

@@ -91,7 +91,18 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        {/*
+          suppressHydrationWarning: once a CSP is in force the browser hides
+          the `nonce` content attribute — the DOM reads `nonce=""` while the
+          script's `.nonce` property still carries the value — so React's dev
+          hydration check sees a mismatch it cannot patch and warns on every
+          page. The script has already run by then; nothing is wrong.
+        */}
+        <script
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }}
+        />
       </head>
       <body className={`${inter.variable} ${mono.variable} antialiased`}>
         {children}

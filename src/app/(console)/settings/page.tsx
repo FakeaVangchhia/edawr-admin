@@ -98,10 +98,13 @@ export default function SettingsPage() {
               </thead>
               <tbody>
                 {data.delivery_tiers.map((tier) => (
-                  <tr key={tier.type}>
+                  <tr key={tier.key}>
                     <td>
                       {tier.label}
-                      {tier.type === data.default_delivery_type ? (
+                      {/* The config carries the default's figures flat rather
+                          than naming it; the tier they belong to is the one. */}
+                      {tier.promise_minutes === data.promise_minutes &&
+                      tier.fee === data.delivery_fee ? (
                         <span className="badge badge-accent ml-1.5">Default</span>
                       ) : null}
                     </td>
@@ -141,9 +144,10 @@ export default function SettingsPage() {
             An account proves someone knows a number, not that they hold the SIM, so it sees only
             the orders placed while signed in to it. Verification needs an SMS provider.
           </Gap>
-          <Gap title="Rider positions are not reported yet">
-            The map on the overview waits for the rider app to send a position; until it does,
-            every rider reads &ldquo;no position yet&rdquo;.
+          <Gap title="Live location is a list, not a map">
+            A rider&rsquo;s phone reports its position only while carrying an order, and the customer
+            sees distance and direction on the tracking page. Drawing either on a real map needs a
+            tile provider and a key, which is a decision for the shop rather than a default.
           </Gap>
           <Gap title="No receipt and no tax fields">
             No printable invoice, no HSN codes, no GSTIN. A compliant tax invoice cannot be issued
@@ -440,7 +444,7 @@ function OperationsForm({
         </button>
         <button
           type="button"
-          className="btn"
+          className="btn btn-secondary"
           disabled={busy}
           onClick={() => {
             setEdits(null);

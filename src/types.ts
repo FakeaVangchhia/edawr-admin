@@ -242,7 +242,12 @@ export interface AuditEntry {
   entity: string;
   entity_id: number | null;
   summary: string;
-  changes: Record<string, [string | null, string | null]> | null;
+  /**
+   * Field → `[before, after]`, as `api/audit.py` records it — plus the odd
+   * flag beside them (`auto: true` on an automatic assignment), so a value is
+   * not guaranteed to be a pair and the renderer checks before destructuring.
+   */
+  changes: Record<string, [unknown, unknown] | unknown> | null;
   created_at: string;
 }
 
@@ -352,15 +357,24 @@ export interface InventoryHealth {
   items: TopProduct[];
 }
 
+/**
+ * `GET /api/store/config`, as the API actually shapes it — `StoreConfigSerializer`
+ * in `api/serializers.py`. There is no "default tier" field: the default's
+ * numbers travel flat as `promise_minutes` and `delivery_fee`, and the tier
+ * whose figures match is the default.
+ */
 export interface StoreConfig {
   store_name: string;
   store_city: string;
   free_delivery_above: number;
   handling_fee: number;
   min_order_value: number;
-  default_delivery_type: DeliveryType;
+  /** The default tier's window and fee. */
+  promise_minutes: number;
+  delivery_fee: number;
+  /** Fastest first. */
   delivery_tiers: {
-    type: DeliveryType;
+    key: DeliveryType;
     label: string;
     fee: number;
     promise_minutes: number;
