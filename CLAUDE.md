@@ -19,7 +19,7 @@ Every application is its own repository, checked out side by side:
 only place business rules live. Its `deployment.md` is the API's runbook.
 - `../edawr-frontend` — the customer storefront (Next.js 16).
 - `../customer-app` — the customer app (Expo), a port of the storefront.
-- `../mobile` — the Expo rider app. Two commits and no remote.
+- `../edawr-delivery` — the Expo rider app. Two commits and no remote.
 
 The containing directory is not a git repository and must not become one. Run
 git only from inside an application directory.

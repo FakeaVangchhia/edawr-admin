@@ -14,7 +14,7 @@ and it is deployed on its own:
 | API | `edawr-backend` | Django 6 + DRF + PostgreSQL. **The only server.** |
 | Storefront | `edawr-frontend` | The customer web store, Next.js 16, port 3000. |
 | Customer app | `edawr-app` | Expo, a port of the storefront. |
-| Rider app | `mobile/` | Expo, two screens. No remote. |
+| Rider app | `edawr-delivery/` | Expo, two screens. No remote. |
 
 The containing directory (`eDawr/`) is **not** a git repository; the five are
 checked out inside it side by side.
